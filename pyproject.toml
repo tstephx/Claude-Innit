@@ -1,0 +1,25 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "claude-innit"
+version = "0.1.0"
+description = "Claude's persistent memory context system"
+requires-python = ">=3.11"
+dependencies = [
+    "mcp>=1.0.0",
+    "pyyaml>=6.0",
+    "torch>=2.0.0",
+    "sentence-transformers>=2.2.0",
+    "numpy>=1.24.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+]
+
+[project.scripts]
+claude-innit = "claude_innit.server:main"
