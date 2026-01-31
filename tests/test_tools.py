@@ -6,6 +6,8 @@ from pathlib import Path
 from claude_innit.db.database import MemoryDatabase
 from claude_innit.tools.context import get_context
 from claude_innit.tools.search import search
+from claude_innit.tools.memory import remember, forget
+from claude_innit.tools.session import save_session
 
 
 class TestGetContext:
@@ -81,3 +83,81 @@ class TestSearch:
         result = search(db, "Python", method="text")
 
         assert len(result) == 1
+
+
+class TestRemember:
+    """Tests for remember tool."""
+
+    def test_stores_memory(self, tmp_path):
+        """Remember stores a new memory."""
+        db = MemoryDatabase(tmp_path / "test.db")
+
+        result = remember(
+            db,
+            content="I prefer dark mode",
+            category="personal",
+            generate_embedding=False,
+        )
+
+        assert result["success"] is True
+        assert result["memory_id"] is not None
+
+        # Verify stored
+        memory = db.get_memory(result["memory_id"])
+        assert "dark mode" in memory["content"]
+
+    def test_remember_with_project(self, tmp_path):
+        """Remember can associate with a project."""
+        db = MemoryDatabase(tmp_path / "test.db")
+
+        result = remember(
+            db,
+            content="Using ProcessingAdapter pattern",
+            category="project",
+            project="book-mcp-server",
+            generate_embedding=False,
+        )
+
+        memory = db.get_memory(result["memory_id"])
+        assert memory["category"] == "project"
+
+
+class TestForget:
+    """Tests for forget tool."""
+
+    def test_removes_memory(self, tmp_path):
+        """Forget removes a memory."""
+        db = MemoryDatabase(tmp_path / "test.db")
+        db.insert_memory(
+            id="to-forget",
+            category="personal",
+            content="Something to forget",
+            metadata={},
+        )
+
+        result = forget(db, "to-forget")
+
+        assert result["success"] is True
+        assert db.get_memory("to-forget") is None
+
+
+class TestSaveSession:
+    """Tests for save_session tool."""
+
+    def test_saves_session_summary(self, tmp_path):
+        """Save session creates session memory."""
+        db = MemoryDatabase(tmp_path / "test.db")
+
+        result = save_session(
+            db,
+            summary="Worked on ProcessingAdapter integration",
+            topics=["book-ingestion", "MCP"],
+            project="book-mcp-server",
+        )
+
+        assert result["success"] is True
+
+        # Verify stored
+        memory = db.get_memory(result["session_id"])
+        assert memory["category"] == "session"
+        assert "ProcessingAdapter" in memory["content"]
