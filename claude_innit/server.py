@@ -18,6 +18,7 @@ from claude_innit.tools import (
     remember,
     forget,
     save_session,
+    check_integrity,
 )
 
 
@@ -139,6 +140,19 @@ class InnitServer:
                     },
                 },
             ),
+            Tool(
+                name="check_integrity",
+                description="Check database health and auto-repair issues (FTS index sync, orphaned embeddings, SQLite integrity)",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "auto_repair": {
+                            "type": "boolean",
+                            "description": "Automatically fix issues found (default: true)",
+                        },
+                    },
+                },
+            ),
         ]
 
     @property
@@ -177,6 +191,11 @@ class InnitServer:
             )
         elif name == "sync":
             result = self.sync.sync_all()
+        elif name == "check_integrity":
+            result = check_integrity(
+                self.db,
+                auto_repair=arguments.get("auto_repair", True),
+            )
         else:
             result = {"error": f"Unknown tool: {name}"}
 

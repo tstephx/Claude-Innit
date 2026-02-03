@@ -118,6 +118,83 @@ class MemoryDatabase:
         ).fetchall()
         return [dict(row) for row in rows]
 
+    def integrity_check(self, auto_repair: bool = True) -> dict:
+        """Check database integrity and optionally repair issues.
+
+        Checks:
+        - SQLite structural integrity
+        - FTS index sync with memories table
+        - Orphaned embeddings (no matching memory)
+
+        Returns dict with status, issues found, and repairs made.
+        """
+        issues = []
+        repairs = []
+
+        # 1. SQLite integrity check
+        result = self._conn.execute("PRAGMA integrity_check").fetchone()
+        sqlite_ok = result[0] == "ok"
+        if not sqlite_ok:
+            issues.append(f"SQLite integrity: {result[0]}")
+
+        # 2. FTS index sync check
+        memory_count = self._conn.execute(
+            "SELECT COUNT(*) FROM memories"
+        ).fetchone()[0]
+        fts_count = self._conn.execute(
+            "SELECT COUNT(*) FROM memories_fts_docsize"
+        ).fetchone()[0]
+
+        if memory_count != fts_count:
+            issues.append(
+                f"FTS index out of sync: {fts_count} FTS entries vs {memory_count} memories"
+            )
+            if auto_repair:
+                self._conn.execute(
+                    "INSERT INTO memories_fts(memories_fts) VALUES('rebuild')"
+                )
+                self._conn.commit()
+                new_fts_count = self._conn.execute(
+                    "SELECT COUNT(*) FROM memories_fts_docsize"
+                ).fetchone()[0]
+                repairs.append(
+                    f"FTS index rebuilt: {fts_count} -> {new_fts_count} entries"
+                )
+
+        # 3. Orphaned embeddings check
+        orphaned = self._conn.execute(
+            """SELECT e.memory_id FROM embeddings e
+               LEFT JOIN memories m ON e.memory_id = m.id
+               WHERE m.id IS NULL"""
+        ).fetchall()
+
+        if orphaned:
+            orphan_ids = [row[0] for row in orphaned]
+            issues.append(
+                f"{len(orphan_ids)} orphaned embeddings: {orphan_ids[:5]}"
+                + ("..." if len(orphan_ids) > 5 else "")
+            )
+            if auto_repair:
+                self._conn.execute(
+                    """DELETE FROM embeddings WHERE memory_id NOT IN
+                       (SELECT id FROM memories)"""
+                )
+                self._conn.commit()
+                repairs.append(
+                    f"Removed {len(orphan_ids)} orphaned embeddings"
+                )
+
+        return {
+            "status": "healthy" if not issues else ("repaired" if repairs else "unhealthy"),
+            "memories": memory_count,
+            "fts_entries": fts_count if not repairs else new_fts_count,
+            "embeddings": self._conn.execute(
+                "SELECT COUNT(*) FROM embeddings"
+            ).fetchone()[0],
+            "issues": issues,
+            "repairs": repairs,
+        }
+
     def close(self):
         """Close database connection."""
         self._conn.close()
