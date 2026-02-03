@@ -1,10 +1,34 @@
 """Memory management tools."""
 
 import uuid
+from pathlib import Path
 from typing import Optional
+
+import yaml
 
 from claude_innit.db.database import MemoryDatabase
 from claude_innit.db.embeddings import EmbeddingStore
+
+
+def _write_memory_markdown(memories_dir: Path, memory_id: str, content: str, metadata: dict) -> None:
+    """Write a memory markdown file to the memories directory."""
+    file_path = memories_dir / f"{memory_id}.md"
+    file_path.parent.mkdir(parents=True, exist_ok=True)
+
+    frontmatter = {}
+    if metadata.get("category"):
+        frontmatter["category"] = metadata["category"]
+    if metadata.get("project"):
+        frontmatter["project"] = metadata["project"]
+
+    lines = ["---"]
+    lines.append(yaml.dump(frontmatter, default_flow_style=False).rstrip())
+    lines.append("---")
+    lines.append("")
+    lines.append(content)
+    lines.append("")
+
+    file_path.write_text("\n".join(lines))
 
 
 def remember(
@@ -13,6 +37,7 @@ def remember(
     category: str,
     project: Optional[str] = None,
     generate_embedding: bool = True,
+    memories_dir: Optional[Path] = None,
 ) -> dict:
     """
     Store a new memory.
@@ -23,6 +48,7 @@ def remember(
         category: "personal", "project", or "session"
         project: Optional project name for project memories
         generate_embedding: Whether to generate embedding
+        memories_dir: Optional path to memories directory for writing markdown files
 
     Returns:
         Dict with success status and memory_id
@@ -40,6 +66,12 @@ def remember(
             content=content,
             metadata=metadata,
         )
+
+        if memories_dir:
+            fm = {"category": category}
+            if project:
+                fm["project"] = project
+            _write_memory_markdown(memories_dir, memory_id, content, fm)
 
         if generate_embedding:
             try:

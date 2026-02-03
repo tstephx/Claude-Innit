@@ -3,6 +3,8 @@
 import pytest
 from pathlib import Path
 
+import yaml
+
 from claude_innit.db.database import MemoryDatabase
 from claude_innit.tools.context import get_context
 from claude_innit.tools.search import search
@@ -161,3 +163,117 @@ class TestSaveSession:
         memory = db.get_memory(result["session_id"])
         assert memory["category"] == "session"
         assert "ProcessingAdapter" in memory["content"]
+
+    def test_writes_session_markdown_file(self, tmp_path):
+        """Save session writes a markdown file when memories_dir is provided."""
+        db = MemoryDatabase(tmp_path / "test.db")
+        memories_dir = tmp_path / "memories"
+
+        result = save_session(
+            db,
+            summary="Built the authentication module",
+            topics=["auth", "security"],
+            project="my-app",
+            memories_dir=memories_dir,
+        )
+
+        assert result["success"] is True
+
+        # Find the written file
+        session_files = list((memories_dir / "sessions").glob("*.md"))
+        assert len(session_files) == 1
+
+        content = session_files[0].read_text()
+        assert "---" in content
+        assert "Built the authentication module" in content
+
+        # Parse frontmatter
+        parts = content.split("---")
+        frontmatter = yaml.safe_load(parts[1])
+        assert frontmatter["project"] == "my-app"
+        assert frontmatter["topics"] == ["auth", "security"]
+        assert "date" in frontmatter
+
+    def test_no_file_without_memories_dir(self, tmp_path):
+        """Save session does not write a file when memories_dir is not provided."""
+        db = MemoryDatabase(tmp_path / "test.db")
+
+        result = save_session(
+            db,
+            summary="No file should be written",
+        )
+
+        assert result["success"] is True
+        # No memories directory should be created
+        assert not (tmp_path / "memories").exists()
+
+
+class TestRememberMarkdown:
+    """Tests for remember tool markdown file writing."""
+
+    def test_writes_memory_markdown_file(self, tmp_path):
+        """Remember writes a markdown file when memories_dir is provided."""
+        db = MemoryDatabase(tmp_path / "test.db")
+        memories_dir = tmp_path / "memories"
+
+        result = remember(
+            db,
+            content="I prefer dark mode",
+            category="personal",
+            generate_embedding=False,
+            memories_dir=memories_dir,
+        )
+
+        assert result["success"] is True
+
+        # Find the written file
+        memory_files = list((memories_dir / "personal").glob("*.md"))
+        assert len(memory_files) == 1
+
+        content = memory_files[0].read_text()
+        assert "---" in content
+        assert "I prefer dark mode" in content
+
+        # Parse frontmatter
+        parts = content.split("---")
+        frontmatter = yaml.safe_load(parts[1])
+        assert frontmatter["category"] == "personal"
+
+    def test_writes_memory_with_project(self, tmp_path):
+        """Remember writes project metadata in frontmatter."""
+        db = MemoryDatabase(tmp_path / "test.db")
+        memories_dir = tmp_path / "memories"
+
+        result = remember(
+            db,
+            content="Using adapter pattern",
+            category="project",
+            project="book-mcp",
+            generate_embedding=False,
+            memories_dir=memories_dir,
+        )
+
+        assert result["success"] is True
+
+        memory_files = list((memories_dir / "project").glob("*.md"))
+        assert len(memory_files) == 1
+
+        content = memory_files[0].read_text()
+        parts = content.split("---")
+        frontmatter = yaml.safe_load(parts[1])
+        assert frontmatter["project"] == "book-mcp"
+        assert frontmatter["category"] == "project"
+
+    def test_no_file_without_memories_dir(self, tmp_path):
+        """Remember does not write a file when memories_dir is not provided."""
+        db = MemoryDatabase(tmp_path / "test.db")
+
+        result = remember(
+            db,
+            content="No file please",
+            category="personal",
+            generate_embedding=False,
+        )
+
+        assert result["success"] is True
+        assert not (tmp_path / "memories").exists()

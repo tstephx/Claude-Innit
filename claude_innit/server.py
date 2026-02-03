@@ -25,10 +25,11 @@ from claude_innit.tools import (
 class InnitServer:
     """MCP server wrapper with tool registration."""
 
-    def __init__(self, server: Server, db: MemoryDatabase, sync: MarkdownSync):
+    def __init__(self, server: Server, db: MemoryDatabase, sync: MarkdownSync, memories_dir: Path):
         self.server = server
         self.db = db
         self.sync = sync
+        self.memories_dir = memories_dir
         self.embedding_store = EmbeddingStore(db)
         self._tools = self._define_tools()
 
@@ -179,6 +180,7 @@ class InnitServer:
                 content=arguments["content"],
                 category=arguments["category"],
                 project=arguments.get("project"),
+                memories_dir=self.memories_dir,
             )
         elif name == "forget":
             result = forget(self.db, arguments["memory_id"])
@@ -188,6 +190,7 @@ class InnitServer:
                 summary=arguments["summary"],
                 topics=arguments.get("topics"),
                 project=arguments.get("project"),
+                memories_dir=self.memories_dir,
             )
         elif name == "sync":
             result = self.sync.sync_all()
@@ -218,7 +221,7 @@ def create_server(
         sync.sync_all()
 
     # Create wrapper
-    innit_server = InnitServer(server, db, sync)
+    innit_server = InnitServer(server, db, sync, memories_dir)
 
     # Register handlers
     @server.list_tools()
