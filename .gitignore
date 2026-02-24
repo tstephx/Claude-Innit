@@ -12,6 +12,9 @@ __pycache__/
 # Database
 *.db
 
+# Memory data (personal context - do not commit)
+data/memories/
+
 # IDE
 .idea/
 .vscode/

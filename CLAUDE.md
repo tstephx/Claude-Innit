@@ -1,137 +1,87 @@
-# CLAUDE.md - Claude-Innit Memory System
-
-## Session Initialization (READ FIRST)
+# CLAUDE.md — Claude-Innit Memory System
+<!-- project-name: claude-innit -->
 
 **DO NOT scan directories on startup.** This is a focused MCP server project.
 
-### Quick Start Protocol
-1. Run `get_context(project="claude-innit")` for project memory
-2. Check `git status` and `git log -3` for recent state
-3. Ask the user what they want to work on
-
----
+## Operational Rules
+- Markdown in `data/memories/` is the source of truth. Do not hand-edit the SQLite DB except for debugging.
+- Any change to memory markdown format, sync logic, or search routing MUST include test updates.
+- Do not paste user memory content into chat; summarize and reference file paths.
 
 ## Project Purpose
+MCP server giving Claude persistent memory across sessions. Three categories (personal, project, session), dual search (FTS5 + semantic), markdown-first storage.
 
-MCP server that gives Claude persistent memory across sessions. Three memory categories (personal, project, session), dual search (FTS5 + semantic), markdown-first storage.
+## Data & Git Hygiene
+- `data/innit.db` — gitignored (`*.db`)
+- `data/memories/` — contains personal context. **Verify this is gitignored before committing.** Add `data/memories/sessions/` to `.gitignore` if not already excluded.
+- For deployed use: store DB + memories outside repo and point server at that location.
 
----
+## MCP Tools (7)
 
-## Project Structure (No Scanning Needed)
+| Tool | Purpose |
+|------|---------|
+| `get_context` | Load memories for session start |
+| `search` | Find memories (auto-routes FTS5/semantic) |
+| `remember` | Store new memory |
+| `forget` | Remove a memory |
+| `save_session` | Save session summary |
+| `sync` | Re-sync markdown → database |
+| `check_integrity` | Verify and repair database |
 
-```
-Claude-Innit/
-├── claude_innit/             # Source code
-│   ├── server.py             # Main MCP server entry point
-│   ├── tools/                # MCP tool implementations
-│   │   ├── context.py        # get_context tool
-│   │   ├── memory.py         # remember, forget tools
-│   │   ├── search.py         # search tool
-│   │   ├── session.py        # save_session tool
-│   │   └── maintenance.py    # sync, check_integrity tools
-│   ├── db/                   # Database operations
-│   │   ├── database.py       # SQLite + FTS5 operations
-│   │   └── embeddings.py     # Sentence-transformer embeddings
-│   └── sync/                 # Markdown sync engine
-│       └── sync_engine.py    # Bidirectional markdown ↔ DB sync
-│
-├── data/                     # Runtime data
-│   ├── innit.db              # SQLite database (FTS5 + embeddings)
-│   └── memories/             # Markdown files (SOURCE OF TRUTH)
-│       ├── personal/         # Identity, preferences
-│       ├── project/          # Per-project context
-│       └── sessions/         # Session summaries
-│
-├── tests/                    # Test suite (19 tests)
-│   ├── test_database.py
-│   ├── test_embeddings.py
-│   ├── test_server.py
-│   ├── test_sync.py
-│   └── test_tools.py
-│
-├── docs/                     # Design documents
-├── scripts/                  # Utility scripts
-├── pyproject.toml            # Package config
-└── README.md                 # Installation guide
-```
+## Key Design Decisions
+- **Markdown-first**: `data/memories/` is truth; DB is index
+- **Search routing**: 1-3 words → FTS5 (fast), 4+ → semantic (conceptual)
+- **Lazy embedding**: model loads only on first semantic search
+- **Model**: all-MiniLM-L6-v2 (384-dim)
 
----
-
-## MCP Tools (7 total)
-
-| Tool | Purpose | Example |
-|------|---------|---------|
-| `get_context` | Load memories for session start | `get_context(project="my-project")` |
-| `search` | Find memories (auto-routes FTS5/semantic) | `search("Python preferences")` |
-| `remember` | Store new memory | `remember(content, category, project)` |
-| `forget` | Remove a memory | `forget(memory_id)` |
-| `save_session` | Save session summary | `save_session(summary, project, topics)` |
-| `sync` | Re-sync markdown to database | `sync(force=True)` |
-| `check_integrity` | Verify and repair database | `check_integrity(auto_repair=True)` |
-
----
-
-## Key Technical Decisions
-
-- **Markdown-first**: Files in `data/memories/` are source of truth; DB is index
-- **Smart search routing**: 1-3 words → FTS5 (fast), 4+ words → semantic (conceptual)
-- **Lazy embedding load**: Model only loads when semantic search is needed
-- **all-MiniLM-L6-v2**: 384-dim embeddings, fast and good quality
-
----
-
-## Development Commands
-
+## Commands
 ```bash
-# Run tests
-pytest tests/ -v
-
-# Run specific test file
-pytest tests/test_tools.py -v
-
-# Run MCP server directly
-python -m claude_innit.server
-
-# Install in development mode
-pip install -e .
+pytest tests/ -v                    # all tests
+python -m claude_innit.server       # run MCP server
+pip install -e .                    # dev install
 ```
 
----
+## Common Footguns
+
+| Problem | Fix |
+|---------|-----|
+| DB locked / SQLITE_BUSY | Stop concurrent runs; retry |
+| Semantic search slow first time | Expected — embedding model lazy-loads. Rerun query. |
+| Short query misses semantic matches | Rephrase as longer natural-language query |
+| Long query misses exact match | Use shorter keyword query |
+| Memories out of sync | `sync(force=True)` then `check_integrity(auto_repair=True)` |
+
+## Change Protocol
+1. `pytest tests/ -v` (before)
+2. Change smallest surface area possible
+3. `pytest tests/ -v` (after)
+4. If schema or markdown format changed: `sync(force=True)` + validate
 
 ## Common Tasks
 
 ### Add a new MCP tool
-1. Create tool function in `claude_innit/tools/`
-2. Register in `claude_innit/tools/__init__.py`
-3. Add to server in `claude_innit/server.py`
-4. Write tests in `tests/test_tools.py`
+1. Create in `claude_innit/tools/`, register in `__init__.py`
+2. Add to `server.py`, write tests in `tests/test_tools.py`
 
 ### Modify database schema
-1. Update `claude_innit/db/database.py`
-2. Update sync engine if markdown format changes
-3. Run `sync(force=True)` to rebuild
+1. Update `db/database.py`, update sync engine if format changes
+2. `sync(force=True)` to rebuild
 
 ### Debug memory issues
-1. Check `data/memories/` for markdown files
-2. Run `check_integrity(auto_repair=True)`
-3. Check `data/innit.db` with sqlite3 if needed
+1. Check `data/memories/` markdown files
+2. `check_integrity(auto_repair=True)`
+3. Inspect `data/innit.db` with sqlite3 if needed
+
+## Quick Read Order (Debugging)
+1. `claude_innit/server.py`
+2. `claude_innit/tools/search.py` + `claude_innit/db/database.py`
+3. `claude_innit/sync/sync_engine.py`
+4. `tests/test_sync.py`, `tests/test_tools.py`
+
+## Git
+- Branch: `main` — Style: `feat:`, `fix:`, `test:`, `refactor:`
+- TDD: tests before implementation
 
 ---
 
-## Git Workflow
-
-- Branch: `main`
-- Commit style: `feat:`, `fix:`, `test:`, `refactor:`
-- TDD: Write tests before implementation
-
----
-
-## Memory Integration
-
-This project IS claude-innit, so use it for its own context:
-- `get_context(project="claude-innit")` - Load project memory
-- `remember(content, category="project", project="claude-innit")` - Save decisions
-
----
-
-*Last updated: 2026-02-06*
+*Last updated: 2026-02-18*
