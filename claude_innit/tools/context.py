@@ -51,17 +51,40 @@ def get_context(
         ).fetchall()
     result["project"] = [dict(row) for row in project_rows]
 
-    # Load recent sessions
+    # Load recent sessions (filtered by project if specified)
     if include_sessions:
-        session_rows = db.execute(
-            """
-            SELECT * FROM memories
-            WHERE category = 'session'
-            ORDER BY updated_at DESC
-            LIMIT ?
-            """,
-            (session_limit,),
-        ).fetchall()
+        if project:
+            session_rows = db.execute(
+                """
+                SELECT * FROM memories
+                WHERE category = 'session'
+                AND json_extract(metadata, '$.project') = ?
+                ORDER BY updated_at DESC
+                LIMIT ?
+                """,
+                (project, session_limit),
+            ).fetchall()
+            # Fall back to unfiltered if no project-specific sessions found
+            if not session_rows:
+                session_rows = db.execute(
+                    """
+                    SELECT * FROM memories
+                    WHERE category = 'session'
+                    ORDER BY updated_at DESC
+                    LIMIT ?
+                    """,
+                    (session_limit,),
+                ).fetchall()
+        else:
+            session_rows = db.execute(
+                """
+                SELECT * FROM memories
+                WHERE category = 'session'
+                ORDER BY updated_at DESC
+                LIMIT ?
+                """,
+                (session_limit,),
+            ).fetchall()
         result["recent_sessions"] = [dict(row) for row in session_rows]
 
     return result
