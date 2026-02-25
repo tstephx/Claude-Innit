@@ -78,10 +78,16 @@ pip install -e .                    # dev install
 3. `claude_innit/sync/sync_engine.py`
 4. `tests/test_sync.py`, `tests/test_tools.py`
 
+## Documentation
+- ADRs: `docs/decisions/` — permanent decision log, numbered ADR-NNN
+- Active work: `docs/active/` — open items only; files >14 days old are stale, flag them
+- Archive: `docs/archive/` — executed plans, read-only reference
+- Plans: `docs/plans/` — staging area; move to `docs/archive/` when done
+
 ## Git
 - Branch: `main` — Style: `feat:`, `fix:`, `test:`, `refactor:`
 - TDD: tests before implementation
 
 ---
 
-*Last updated: 2026-02-18*
+*Last updated: 2026-02-24*
