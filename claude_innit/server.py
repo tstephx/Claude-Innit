@@ -164,44 +164,47 @@ class InnitServer:
         return self._tools
 
     async def call_tool(self, name: str, arguments: dict) -> list[TextContent]:
-        """Handle tool calls."""
-        if name == "get_context":
-            result = get_context(self.db, project=arguments.get("project"))
-        elif name == "search":
-            result = search(
-                self.db,
-                query=arguments["query"],
-                method=arguments.get("method", "auto"),
-                embedding_store=self.embedding_store,
-            )
-        elif name == "remember":
-            result = remember(
-                self.db,
-                content=arguments["content"],
-                category=arguments["category"],
-                project=arguments.get("project"),
-                memories_dir=self.memories_dir,
-                embedding_store=self.embedding_store,
-            )
-        elif name == "forget":
-            result = forget(self.db, arguments["memory_id"], memories_dir=self.memories_dir)
-        elif name == "save_session":
-            result = save_session(
-                self.db,
-                summary=arguments["summary"],
-                topics=arguments.get("topics"),
-                project=arguments.get("project"),
-                memories_dir=self.memories_dir,
-            )
-        elif name == "sync":
-            result = self.sync.sync_all()
-        elif name == "check_integrity":
-            result = check_integrity(
-                self.db,
-                auto_repair=arguments.get("auto_repair", True),
-            )
-        else:
-            result = {"error": f"Unknown tool: {name}"}
+        """Handle tool calls with error boundary — never drops the MCP connection."""
+        try:
+            if name == "get_context":
+                result = get_context(self.db, project=arguments.get("project"))
+            elif name == "search":
+                result = search(
+                    self.db,
+                    query=arguments["query"],
+                    method=arguments.get("method", "auto"),
+                    embedding_store=self.embedding_store,
+                )
+            elif name == "remember":
+                result = remember(
+                    self.db,
+                    content=arguments["content"],
+                    category=arguments["category"],
+                    project=arguments.get("project"),
+                    memories_dir=self.memories_dir,
+                    embedding_store=self.embedding_store,
+                )
+            elif name == "forget":
+                result = forget(self.db, arguments["memory_id"], memories_dir=self.memories_dir)
+            elif name == "save_session":
+                result = save_session(
+                    self.db,
+                    summary=arguments["summary"],
+                    topics=arguments.get("topics"),
+                    project=arguments.get("project"),
+                    memories_dir=self.memories_dir,
+                )
+            elif name == "sync":
+                result = self.sync.sync_all()
+            elif name == "check_integrity":
+                result = check_integrity(
+                    self.db,
+                    auto_repair=arguments.get("auto_repair", True),
+                )
+            else:
+                result = {"error": f"Unknown tool: {name}"}
+        except Exception as e:
+            result = {"error": type(e).__name__, "message": str(e), "tool": name}
 
         return [TextContent(type="text", text=json.dumps(result, indent=2, default=str))]
 
