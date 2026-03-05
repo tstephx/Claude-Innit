@@ -54,6 +54,41 @@ class TestGetContext:
         assert len(result["project"]) == 1
         assert "Book MCP" in result["project"][0]["content"]
 
+    def test_get_context_output_shape(self, tmp_path):
+        """get_context returns dict with list values having required keys."""
+        db = MemoryDatabase(tmp_path / "test.db")
+        db.insert_memory(id="personal/x1", category="personal", content="I am Taylor", metadata={})
+        db.insert_memory(id="project/y1", category="project", content="myapp state", metadata={"name": "myapp"})
+        db.insert_memory(id="session/z1", category="session", content="session summary", metadata={})
+
+        result = get_context(db)
+
+        # Top-level structure
+        assert isinstance(result, dict)
+        assert isinstance(result["personal"], list)
+        assert isinstance(result["project"], list)
+        assert isinstance(result["recent_sessions"], list)
+
+        # Each personal entry has required keys
+        for entry in result["personal"]:
+            assert isinstance(entry, dict)
+            assert "id" in entry
+            assert "content" in entry
+            assert "category" in entry
+            assert "updated_at" in entry
+
+    def test_get_context_fallback_to_all_sessions(self, tmp_path):
+        """When project filter returns no sessions, falls back to all sessions."""
+        db = MemoryDatabase(tmp_path / "test.db")
+        db.insert_memory(id="session/1", category="session", content="unrelated session", metadata={"project": "other"})
+
+        result = get_context(db, project="myapp")
+
+        # No myapp sessions exist, should fall back to all sessions
+        assert isinstance(result["recent_sessions"], list)
+        assert len(result["recent_sessions"]) == 1
+        assert result["recent_sessions"][0]["id"] == "session/1"
+
 
 class TestSearch:
     """Tests for search tool."""
