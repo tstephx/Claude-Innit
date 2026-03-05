@@ -10,6 +10,7 @@ from claude_innit.tools.context import get_context
 from claude_innit.tools.search import search
 from claude_innit.tools.memory import remember, forget
 from claude_innit.tools.session import save_session
+from claude_innit.sync.markdown_sync import MarkdownSync
 
 
 class TestGetContext:
@@ -277,3 +278,56 @@ class TestRememberMarkdown:
 
         assert result["success"] is True
         assert not (tmp_path / "memories").exists()
+
+
+class TestForgetDurability:
+    """Tests that forget() survives a sync cycle."""
+
+    def test_forget_deletes_markdown_file(self, tmp_path):
+        """forget() removes the markdown file so sync cannot re-insert it."""
+        db = MemoryDatabase(tmp_path / "test.db")
+        memories_dir = tmp_path / "memories"
+
+        # Create memory with markdown file
+        result = remember(
+            db,
+            content="This should be forgotten",
+            category="personal",
+            generate_embedding=False,
+            memories_dir=memories_dir,
+        )
+        memory_id = result["memory_id"]
+
+        # Verify file exists
+        md_file = memories_dir / f"{memory_id}.md"
+        assert md_file.exists()
+
+        # Forget it
+        forget_result = forget(db, memory_id, memories_dir=memories_dir)
+        assert forget_result["success"] is True
+
+        # Markdown file must be gone
+        assert not md_file.exists()
+
+    def test_forget_survives_sync(self, tmp_path):
+        """After forget(), a full sync does not re-insert the memory."""
+        db = MemoryDatabase(tmp_path / "test.db")
+        memories_dir = tmp_path / "memories"
+
+        result = remember(
+            db,
+            content="Temporary improvement note",
+            category="personal",
+            generate_embedding=False,
+            memories_dir=memories_dir,
+        )
+        memory_id = result["memory_id"]
+
+        forget(db, memory_id, memories_dir=memories_dir)
+
+        # Simulate server restart (new db + sync)
+        db2 = MemoryDatabase(tmp_path / "test.db")
+        sync = MarkdownSync(tmp_path / "test.db", memories_dir, generate_embeddings=False)
+        sync.sync_all()
+
+        assert db2.get_memory(memory_id) is None

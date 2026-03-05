@@ -85,23 +85,27 @@ def remember(
         return {"success": False, "error": str(e)}
 
 
-def forget(db: MemoryDatabase, memory_id: str) -> dict:
+def forget(db: MemoryDatabase, memory_id: str, memories_dir: Optional[Path] = None) -> dict:
     """
-    Remove a memory.
+    Remove a memory permanently.
 
     Args:
         db: Database connection
         memory_id: ID of memory to remove
+        memories_dir: Path to memories directory — required for durable deletion.
+                      Without it, the markdown file survives and sync will re-insert.
 
     Returns:
         Dict with success status
     """
     try:
-        # Delete from embeddings first (foreign key)
-        db.execute("DELETE FROM embeddings WHERE memory_id = ?", (memory_id,))
-        # Delete from memories (triggers handle FTS)
-        db.execute("DELETE FROM memories WHERE id = ?", (memory_id,))
-        db._conn.commit()
+        # Delete markdown file first — if this fails, abort before touching DB
+        if memories_dir is not None:
+            md_file = memories_dir / f"{memory_id}.md"
+            if md_file.exists():
+                md_file.unlink()
+
+        db.delete_memory(memory_id)
 
         return {"success": True}
     except Exception as e:

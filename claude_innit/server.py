@@ -183,7 +183,7 @@ class InnitServer:
                 memories_dir=self.memories_dir,
             )
         elif name == "forget":
-            result = forget(self.db, arguments["memory_id"])
+            result = forget(self.db, arguments["memory_id"], memories_dir=self.memories_dir)
         elif name == "save_session":
             result = save_session(
                 self.db,
