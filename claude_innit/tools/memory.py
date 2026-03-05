@@ -107,6 +107,8 @@ def forget(db: MemoryDatabase, memory_id: str, memories_dir: Optional[Path] = No
 
         db.delete_memory(memory_id)
 
+        if memories_dir is None:
+            return {"success": True, "warning": "memories_dir not provided; markdown file was not deleted and may be re-inserted on next sync"}
         return {"success": True}
     except Exception as e:
         return {"success": False, "error": str(e)}

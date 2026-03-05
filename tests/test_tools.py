@@ -298,16 +298,17 @@ class TestForgetDurability:
         )
         memory_id = result["memory_id"]
 
-        # Verify file exists
-        md_file = memories_dir / f"{memory_id}.md"
-        assert md_file.exists()
+        # Verify file exists before forgetting
+        md_files_before = list(memories_dir.rglob("*.md"))
+        assert len(md_files_before) == 1
 
         # Forget it
         forget_result = forget(db, memory_id, memories_dir=memories_dir)
         assert forget_result["success"] is True
 
         # Markdown file must be gone
-        assert not md_file.exists()
+        md_files_after = list(memories_dir.rglob("*.md"))
+        assert len(md_files_after) == 0
 
     def test_forget_survives_sync(self, tmp_path):
         """After forget(), a full sync does not re-insert the memory."""
