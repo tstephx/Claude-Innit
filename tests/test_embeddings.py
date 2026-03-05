@@ -62,3 +62,59 @@ class TestEmbeddingStore:
         result_ids = [r["id"] for r in results]
         # m1 and m3 should be in top results
         assert "m1" in result_ids[:2] or "m3" in result_ids[:2]
+
+
+def test_semantic_search_filters_low_similarity(tmp_path):
+    """Results below min_similarity threshold are excluded."""
+    from unittest.mock import patch
+    import numpy as np
+    from claude_innit.db.database import MemoryDatabase
+    from claude_innit.db.embeddings import EmbeddingStore
+
+    db = MemoryDatabase(tmp_path / "test.db")
+    db.insert_memory(id="mem/1", category="personal", content="Python programming", metadata={})
+
+    store = EmbeddingStore(db)
+
+    # Store a fixed embedding: uniform vector (normalized)
+    fixed_embedding = np.ones(384, dtype=np.float32)
+    fixed_embedding /= np.linalg.norm(fixed_embedding)
+    blob = fixed_embedding.tobytes()
+    db.execute("INSERT INTO embeddings (memory_id, embedding, model) VALUES (?, ?, ?)",
+               ("mem/1", blob, "test"))
+    db._conn.commit()
+
+    # Query with orthogonal vector (cosine similarity close to 0)
+    orthogonal = np.zeros(384, dtype=np.float32)
+    orthogonal[0] = 1.0
+
+    with patch.object(store, 'generate', return_value=orthogonal):
+        results = store.semantic_search("anything", limit=10, min_similarity=0.5)
+
+    assert len(results) == 0  # filtered out due to low similarity
+
+
+def test_semantic_search_returns_high_similarity(tmp_path):
+    """Results above min_similarity are included."""
+    from unittest.mock import patch
+    import numpy as np
+    from claude_innit.db.database import MemoryDatabase
+    from claude_innit.db.embeddings import EmbeddingStore
+
+    db = MemoryDatabase(tmp_path / "test.db")
+    db.insert_memory(id="mem/1", category="personal", content="Python programming", metadata={})
+
+    store = EmbeddingStore(db)
+
+    fixed_embedding = np.ones(384, dtype=np.float32)
+    fixed_embedding /= np.linalg.norm(fixed_embedding)
+    blob = fixed_embedding.tobytes()
+    db.execute("INSERT INTO embeddings (memory_id, embedding, model) VALUES (?, ?, ?)",
+               ("mem/1", blob, "test"))
+    db._conn.commit()
+
+    with patch.object(store, 'generate', return_value=fixed_embedding.copy()):
+        results = store.semantic_search("anything", limit=10, min_similarity=0.5)
+
+    assert len(results) == 1
+    assert results[0]["similarity"] >= 0.5

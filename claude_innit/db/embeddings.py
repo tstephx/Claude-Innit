@@ -61,14 +61,13 @@ class EmbeddingStore:
             return self._blob_to_embedding(row[0])
         return None
 
-    def semantic_search(self, query: str, limit: int = 10) -> list[dict]:
+    def semantic_search(self, query: str, limit: int = 10, min_similarity: float = 0.35) -> list[dict]:
         """Search memories by semantic similarity."""
         if self.db is None:
             return []
 
         query_embedding = self.generate(query)
 
-        # Get all embeddings
         rows = self.db.execute(
             """
             SELECT e.memory_id, e.embedding, m.*
@@ -77,16 +76,15 @@ class EmbeddingStore:
             """
         ).fetchall()
 
-        # Calculate similarities
         results = []
         for row in rows:
             embedding = self._blob_to_embedding(row["embedding"])
             similarity = self._cosine_similarity(query_embedding, embedding)
-            memory = dict(row)
-            memory["similarity"] = float(similarity)
-            results.append(memory)
+            if similarity >= min_similarity:
+                memory = dict(row)
+                memory["similarity"] = float(similarity)
+                results.append(memory)
 
-        # Sort by similarity
         results.sort(key=lambda x: x["similarity"], reverse=True)
         return results[:limit]
 
