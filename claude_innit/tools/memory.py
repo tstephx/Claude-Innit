@@ -50,6 +50,8 @@ def remember(
         project: Optional project name for project memories
         generate_embedding: Whether to generate embedding
         memories_dir: Optional path to memories directory for writing markdown files
+        embedding_store: Optional pre-loaded EmbeddingStore — pass the server singleton to
+                         avoid reloading the model on every call
 
     Returns:
         Dict with success status and memory_id

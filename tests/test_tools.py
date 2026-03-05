@@ -178,6 +178,22 @@ class TestForget:
         assert result["success"] is True
         assert db.get_memory("to-forget") is None
 
+    def test_forget_returns_warning_without_memories_dir(self, tmp_path):
+        """forget() without memories_dir returns success with a warning."""
+        db = MemoryDatabase(tmp_path / "test.db")
+        db.insert_memory(
+            id="to-forget",
+            category="personal",
+            content="Something to forget",
+            metadata={},
+        )
+
+        result = forget(db, "to-forget")
+
+        assert result["success"] is True
+        assert "warning" in result
+        assert "memories_dir" in result["warning"]
+
 
 class TestSaveSession:
     """Tests for save_session tool."""

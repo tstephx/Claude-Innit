@@ -175,18 +175,9 @@ class InnitServer:
                 name="admin_sync",
                 description=(
                     "Operator tool: Re-sync markdown files to database. "
-                    "Not needed in normal sessions — only call if memories are out of sync after manual file edits. "
-                    "Use force=true to rebuild the entire index."
+                    "Not needed in normal sessions — only call if memories are out of sync after manual file edits."
                 ),
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "force": {
-                            "type": "boolean",
-                            "description": "Force full resync (default: false)",
-                        },
-                    },
-                },
+                inputSchema={"type": "object", "properties": {}},
             ),
             Tool(
                 name="admin_check_integrity",
