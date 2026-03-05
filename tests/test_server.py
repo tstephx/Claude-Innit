@@ -35,7 +35,9 @@ class TestServer:
         assert "remember" in tool_names
         assert "forget" in tool_names
         assert "save_session" in tool_names
-        assert "sync" in tool_names
+        assert "list_memories" in tool_names
+        assert "admin_sync" in tool_names
+        assert "admin_check_integrity" in tool_names
 
 
 @pytest.mark.asyncio

@@ -39,31 +39,39 @@ class InnitServer:
         return [
             Tool(
                 name="get_context",
-                description="Load personal, project, and session context",
+                description=(
+                    "Load all persistent memory for this session. "
+                    "Call this once at the start of every session before doing any other work. "
+                    "Pass the project name to filter to relevant project and session memories."
+                ),
                 inputSchema={
                     "type": "object",
                     "properties": {
                         "project": {
                             "type": "string",
-                            "description": "Optional project name to filter by",
+                            "description": "Project name to filter context (e.g. 'claude-innit', 'my-app')",
                         },
                     },
                 },
             ),
             Tool(
                 name="search",
-                description="Search memories using FTS or semantic search",
+                description=(
+                    "Find stored memories by keyword or concept. "
+                    "Call this when you need information from past sessions that is not in the current get_context result. "
+                    "Short keywords (1-3 words) use exact text match. Longer phrases use semantic/concept search."
+                ),
                 inputSchema={
                     "type": "object",
                     "properties": {
                         "query": {
                             "type": "string",
-                            "description": "Search query",
+                            "description": "Search query — use short keywords for exact match, longer phrases for concept recall",
                         },
                         "method": {
                             "type": "string",
                             "enum": ["auto", "text", "semantic"],
-                            "description": "Search method (default: auto)",
+                            "description": "Search method — auto (default) chooses based on query length",
                         },
                     },
                     "required": ["query"],
@@ -71,13 +79,17 @@ class InnitServer:
             ),
             Tool(
                 name="remember",
-                description="Store a new memory",
+                description=(
+                    "Store new information persistently across sessions. "
+                    "Use for facts, decisions, preferences, or project state that should be recalled in future sessions. "
+                    "Choose category: 'personal' for user preferences/identity, 'project' for per-project state, 'session' for session summaries."
+                ),
                 inputSchema={
                     "type": "object",
                     "properties": {
                         "content": {
                             "type": "string",
-                            "description": "Content to remember",
+                            "description": "The information to remember",
                         },
                         "category": {
                             "type": "string",
@@ -86,7 +98,7 @@ class InnitServer:
                         },
                         "project": {
                             "type": "string",
-                            "description": "Optional project name",
+                            "description": "Project name — required when category is 'project'",
                         },
                     },
                     "required": ["content", "category"],
@@ -94,13 +106,17 @@ class InnitServer:
             ),
             Tool(
                 name="forget",
-                description="Remove a memory",
+                description=(
+                    "Permanently delete a memory. "
+                    "Requires the memory_id — use list_memories first to discover IDs. "
+                    "Use when an improvement has been implemented, a fact is no longer true, or a memory is outdated."
+                ),
                 inputSchema={
                     "type": "object",
                     "properties": {
                         "memory_id": {
                             "type": "string",
-                            "description": "ID of memory to remove",
+                            "description": "ID of memory to delete (e.g. 'personal/a3f8c2d1') — get from list_memories or a prior remember call",
                         },
                     },
                     "required": ["memory_id"],
@@ -108,18 +124,22 @@ class InnitServer:
             ),
             Tool(
                 name="save_session",
-                description="Save session summary",
+                description=(
+                    "Save a summary of this session for future recall. "
+                    "Call once at the end of a working session — not after each sub-task. "
+                    "Include what was completed, what to do next, and any key decisions made."
+                ),
                 inputSchema={
                     "type": "object",
                     "properties": {
                         "summary": {
                             "type": "string",
-                            "description": "Session summary",
+                            "description": "Session summary (use format: LAST: [...] | NEXT: [...] | DECISIONS: [...])",
                         },
                         "topics": {
                             "type": "array",
                             "items": {"type": "string"},
-                            "description": "Topics covered",
+                            "description": "Topics covered in this session",
                         },
                         "project": {
                             "type": "string",
@@ -127,32 +147,6 @@ class InnitServer:
                         },
                     },
                     "required": ["summary"],
-                },
-            ),
-            Tool(
-                name="sync",
-                description="Re-sync markdown files to database",
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "force": {
-                            "type": "boolean",
-                            "description": "Force full resync",
-                        },
-                    },
-                },
-            ),
-            Tool(
-                name="check_integrity",
-                description="Check database health and auto-repair issues (FTS index sync, orphaned embeddings, SQLite integrity)",
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "auto_repair": {
-                            "type": "boolean",
-                            "description": "Automatically fix issues found (default: true)",
-                        },
-                    },
                 },
             ),
             Tool(
@@ -173,6 +167,40 @@ class InnitServer:
                         "project": {
                             "type": "string",
                             "description": "Filter project memories by project name",
+                        },
+                    },
+                },
+            ),
+            Tool(
+                name="admin_sync",
+                description=(
+                    "Operator tool: Re-sync markdown files to database. "
+                    "Not needed in normal sessions — only call if memories are out of sync after manual file edits. "
+                    "Use force=true to rebuild the entire index."
+                ),
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "force": {
+                            "type": "boolean",
+                            "description": "Force full resync (default: false)",
+                        },
+                    },
+                },
+            ),
+            Tool(
+                name="admin_check_integrity",
+                description=(
+                    "Operator tool: Check database health and repair issues. "
+                    "Not needed in normal sessions — only call when experiencing search or sync failures. "
+                    "Checks FTS index sync, orphaned embeddings, and SQLite integrity."
+                ),
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "auto_repair": {
+                            "type": "boolean",
+                            "description": "Automatically fix issues found (default: true)",
                         },
                     },
                 },
@@ -217,9 +245,9 @@ class InnitServer:
                     project=arguments.get("project"),
                     memories_dir=self.memories_dir,
                 )
-            elif name == "sync":
+            elif name == "admin_sync":
                 result = self.sync.sync_all()
-            elif name == "check_integrity":
+            elif name == "admin_check_integrity":
                 result = check_integrity(
                     self.db,
                     auto_repair=arguments.get("auto_repair", True),
