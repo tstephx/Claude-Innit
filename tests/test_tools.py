@@ -280,6 +280,30 @@ class TestRememberMarkdown:
         assert not (tmp_path / "memories").exists()
 
 
+class TestRememberEmbeddingStore:
+    """remember() uses the provided embedding_store instead of creating a new one."""
+
+    def test_remember_uses_provided_embedding_store(self, tmp_path):
+        """remember() calls store_embedding on the provided store, not a new one."""
+        from unittest.mock import MagicMock
+
+        db = MemoryDatabase(tmp_path / "test.db")
+        mock_store = MagicMock()
+
+        result = remember(
+            db,
+            content="Test with mock store",
+            category="personal",
+            generate_embedding=True,
+            embedding_store=mock_store,
+        )
+
+        assert result["success"] is True
+        mock_store.store_embedding.assert_called_once()
+        call_args = mock_store.store_embedding.call_args
+        assert "Test with mock store" in call_args[0][1]
+
+
 class TestForgetDurability:
     """Tests that forget() survives a sync cycle."""
 

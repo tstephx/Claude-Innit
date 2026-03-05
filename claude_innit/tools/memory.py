@@ -38,6 +38,7 @@ def remember(
     project: Optional[str] = None,
     generate_embedding: bool = True,
     memories_dir: Optional[Path] = None,
+    embedding_store: Optional[EmbeddingStore] = None,
 ) -> dict:
     """
     Store a new memory.
@@ -75,10 +76,10 @@ def remember(
 
         if generate_embedding:
             try:
-                store = EmbeddingStore(db)
+                store = embedding_store if embedding_store is not None else EmbeddingStore(db)
                 store.store_embedding(memory_id, content)
             except Exception:
-                pass  # Embedding is optional
+                pass  # Embedding is optional; memory is still stored
 
         return {"success": True, "memory_id": memory_id}
     except Exception as e:

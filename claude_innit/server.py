@@ -181,6 +181,7 @@ class InnitServer:
                 category=arguments["category"],
                 project=arguments.get("project"),
                 memories_dir=self.memories_dir,
+                embedding_store=self.embedding_store,
             )
         elif name == "forget":
             result = forget(self.db, arguments["memory_id"], memories_dir=self.memories_dir)
