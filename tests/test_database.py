@@ -71,3 +71,19 @@ def test_wal_mode_enabled(tmp_path):
     db = MemoryDatabase(tmp_path / "test.db")
     row = db._conn.execute("PRAGMA journal_mode").fetchone()
     assert row[0] == "wal"
+
+
+def test_delete_memory(tmp_path):
+    """delete_memory removes record and embeddings atomically."""
+    db = MemoryDatabase(tmp_path / "test.db")
+    db.insert_memory(id="test/abc", category="personal", content="to delete", metadata={})
+
+    db.delete_memory("test/abc")
+
+    assert db.get_memory("test/abc") is None
+
+
+def test_delete_memory_nonexistent_is_noop(tmp_path):
+    """Deleting a nonexistent memory does not raise."""
+    db = MemoryDatabase(tmp_path / "test.db")
+    db.delete_memory("does/not/exist")  # should not raise

@@ -106,6 +106,12 @@ class MemoryDatabase:
             return dict(row)
         return None
 
+    def delete_memory(self, id: str) -> None:
+        """Delete a memory and its embedding by ID."""
+        self._conn.execute("DELETE FROM embeddings WHERE memory_id = ?", (id,))
+        self._conn.execute("DELETE FROM memories WHERE id = ?", (id,))
+        self._conn.commit()
+
     def fts_search(self, query: str, limit: int = 10) -> list[dict]:
         """Search memories using FTS5."""
         rows = self._conn.execute(
