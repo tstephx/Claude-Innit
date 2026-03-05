@@ -113,18 +113,24 @@ class MemoryDatabase:
         self._conn.commit()
 
     def fts_search(self, query: str, limit: int = 10) -> list[dict]:
-        """Search memories using FTS5."""
-        rows = self._conn.execute(
-            """
-            SELECT m.* FROM memories m
-            JOIN memories_fts fts ON m.id = fts.id
-            WHERE memories_fts MATCH ?
-            ORDER BY rank
-            LIMIT ?
-            """,
-            (query, limit),
-        ).fetchall()
-        return [dict(row) for row in rows]
+        """Search memories using FTS5. Sanitizes query to prevent operator injection."""
+        # Wrap in double-quotes to treat entire query as a phrase, escaping internal quotes
+        safe_query = '"' + query.replace('"', '""') + '"'
+        try:
+            rows = self._conn.execute(
+                """
+                SELECT m.* FROM memories m
+                JOIN memories_fts fts ON m.id = fts.id
+                WHERE memories_fts MATCH ?
+                ORDER BY rank
+                LIMIT ?
+                """,
+                (safe_query, limit),
+            ).fetchall()
+            return [dict(row) for row in rows]
+        except Exception:
+            # Fall back to empty results on any FTS parse error
+            return []
 
     def integrity_check(self, auto_repair: bool = True) -> dict:
         """Check database integrity and optionally repair issues.

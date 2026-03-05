@@ -97,3 +97,19 @@ def test_delete_memory_nonexistent_is_noop(tmp_path):
     """Deleting a nonexistent memory does not raise."""
     db = MemoryDatabase(tmp_path / "test.db")
     db.delete_memory("does/not/exist")  # should not raise
+
+
+@pytest.mark.parametrize("bad_query", [
+    '"unclosed quote',
+    "OR AND NOT",
+    "term*wildcard",
+    "hello OR",
+])
+def test_fts_search_handles_special_chars(tmp_path, bad_query):
+    """fts_search does not raise on FTS5 operator characters."""
+    db = MemoryDatabase(tmp_path / "test.db")
+    db.insert_memory(id="test/1", category="personal", content="normal content", metadata={})
+
+    # Should not raise sqlite3.OperationalError
+    result = db.fts_search(bad_query)
+    assert isinstance(result, list)
