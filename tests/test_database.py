@@ -77,10 +77,20 @@ def test_delete_memory(tmp_path):
     """delete_memory removes record and embeddings atomically."""
     db = MemoryDatabase(tmp_path / "test.db")
     db.insert_memory(id="test/abc", category="personal", content="to delete", metadata={})
+    # Insert a fake embedding to verify it gets cleaned up too
+    db._conn.execute(
+        "INSERT INTO embeddings (memory_id, embedding, model) VALUES (?, ?, ?)",
+        ("test/abc", b"\x00" * 10, "test"),
+    )
+    db._conn.commit()
 
     db.delete_memory("test/abc")
 
     assert db.get_memory("test/abc") is None
+    embedding_row = db._conn.execute(
+        "SELECT * FROM embeddings WHERE memory_id = ?", ("test/abc",)
+    ).fetchone()
+    assert embedding_row is None
 
 
 def test_delete_memory_nonexistent_is_noop(tmp_path):
