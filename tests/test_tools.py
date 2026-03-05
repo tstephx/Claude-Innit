@@ -356,3 +356,62 @@ class TestForgetDurability:
         sync.sync_all()
 
         assert db2.get_memory(memory_id) is None
+
+
+class TestListMemories:
+    """Tests for list_memories tool."""
+
+    def test_lists_all_memories(self, tmp_path):
+        """list_memories returns all memories with id, preview, category, updated_at."""
+        from claude_innit.tools.list import list_memories
+        db = MemoryDatabase(tmp_path / "test.db")
+        db.insert_memory(id="personal/a1", category="personal", content="I prefer dark mode", metadata={})
+        db.insert_memory(id="project/b2", category="project", content="Using adapter pattern", metadata={"name": "myapp"})
+
+        result = list_memories(db)
+
+        assert isinstance(result, list)
+        assert len(result) == 2
+        ids = [m["id"] for m in result]
+        assert "personal/a1" in ids
+        assert "project/b2" in ids
+        for m in result:
+            assert "id" in m
+            assert "preview" in m
+            assert "category" in m
+            assert "updated_at" in m
+
+    def test_filters_by_category(self, tmp_path):
+        """list_memories filters by category."""
+        from claude_innit.tools.list import list_memories
+        db = MemoryDatabase(tmp_path / "test.db")
+        db.insert_memory(id="personal/a1", category="personal", content="personal thing", metadata={})
+        db.insert_memory(id="project/b2", category="project", content="project thing", metadata={})
+
+        result = list_memories(db, category="personal")
+
+        assert len(result) == 1
+        assert result[0]["id"] == "personal/a1"
+
+    def test_filters_by_project(self, tmp_path):
+        """list_memories filters project memories by project name."""
+        from claude_innit.tools.list import list_memories
+        db = MemoryDatabase(tmp_path / "test.db")
+        db.insert_memory(id="project/a1", category="project", content="myapp memory", metadata={"name": "myapp"})
+        db.insert_memory(id="project/b2", category="project", content="other memory", metadata={"name": "other"})
+
+        result = list_memories(db, project="myapp")
+
+        assert len(result) == 1
+        assert result[0]["id"] == "project/a1"
+
+    def test_preview_is_truncated(self, tmp_path):
+        """Preview is max 80 chars + ellipsis."""
+        from claude_innit.tools.list import list_memories
+        db = MemoryDatabase(tmp_path / "test.db")
+        long_content = "x" * 200
+        db.insert_memory(id="personal/a1", category="personal", content=long_content, metadata={})
+
+        result = list_memories(db)
+
+        assert len(result[0]["preview"]) <= 83  # 80 chars + "..."

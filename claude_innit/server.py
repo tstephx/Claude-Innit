@@ -19,6 +19,7 @@ from claude_innit.tools import (
     forget,
     save_session,
     check_integrity,
+    list_memories,
 )
 
 
@@ -154,6 +155,28 @@ class InnitServer:
                     },
                 },
             ),
+            Tool(
+                name="list_memories",
+                description=(
+                    "List stored memories with their IDs, previews, and categories. "
+                    "Call this to discover memory IDs before using forget(), or to audit what is stored. "
+                    "Filter by category ('personal', 'project', 'session') or project name."
+                ),
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "category": {
+                            "type": "string",
+                            "enum": ["personal", "project", "session"],
+                            "description": "Filter by memory category",
+                        },
+                        "project": {
+                            "type": "string",
+                            "description": "Filter project memories by project name",
+                        },
+                    },
+                },
+            ),
         ]
 
     @property
@@ -200,6 +223,12 @@ class InnitServer:
                 result = check_integrity(
                     self.db,
                     auto_repair=arguments.get("auto_repair", True),
+                )
+            elif name == "list_memories":
+                result = list_memories(
+                    self.db,
+                    category=arguments.get("category"),
+                    project=arguments.get("project"),
                 )
             else:
                 result = {"error": f"Unknown tool: {name}"}
