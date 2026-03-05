@@ -64,3 +64,10 @@ class TestMemoryDatabase:
         results = db.fts_search("Taylor")
         assert len(results) == 1
         assert results[0]["id"] == "test-1"
+
+
+def test_wal_mode_enabled(tmp_path):
+    """Database uses WAL journal mode."""
+    db = MemoryDatabase(tmp_path / "test.db")
+    row = db._conn.execute("PRAGMA journal_mode").fetchone()
+    assert row[0] == "wal"
