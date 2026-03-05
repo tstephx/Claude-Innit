@@ -276,10 +276,7 @@ def create_server(
     # Initialize database
     db = MemoryDatabase(db_path)
     sync = MarkdownSync(db_path, memories_dir, generate_embeddings=False)
-
-    # Sync on startup if memories dir exists
-    if memories_dir.exists():
-        sync.sync_all()
+    # Sync is deferred to main() background task — do not block here
 
     # Create wrapper
     innit_server = InnitServer(server, db, sync, memories_dir)
@@ -296,6 +293,14 @@ def create_server(
     return innit_server
 
 
+async def _background_sync(sync: MarkdownSync) -> None:
+    """Run sync in background after server is accepting connections."""
+    try:
+        await asyncio.to_thread(sync.sync_all)
+    except Exception:
+        pass  # Sync failure is non-fatal; server continues without it
+
+
 async def main():
     """Run the MCP server."""
     # Default paths
@@ -306,6 +311,10 @@ async def main():
     innit_server = create_server(db_path, memories_dir)
 
     async with stdio_server() as (read_stream, write_stream):
+        # Defer sync to background — don't block initialize handshake
+        if memories_dir.exists():
+            asyncio.create_task(_background_sync(innit_server.sync))
+
         await innit_server.server.run(
             read_stream,
             write_stream,
