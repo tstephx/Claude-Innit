@@ -16,10 +16,11 @@ MCP server giving Claude persistent memory across sessions. Three categories (pe
 - `data/memories/` — contains personal context. **Verify this is gitignored before committing.** Add `data/memories/sessions/` to `.gitignore` if not already excluded.
 - For deployed use: store DB + memories outside repo and point server at that location.
 
-## MCP Tools (8)
+## MCP Tools (13)
 
 → Full tool reference: [`ref/tools.md`](ref/tools.md)
 
+### Memory Tools
 | Tool | Purpose |
 |------|---------|
 | `get_context` | Load memories for session start |
@@ -31,6 +32,15 @@ MCP server giving Claude persistent memory across sessions. Three categories (pe
 | `admin_sync` | Re-sync markdown → database (operator only) |
 | `admin_check_integrity` | Verify and repair database (operator only) |
 
+### Vault Tools (OBF)
+| Tool | Purpose |
+|------|---------|
+| `vault_index` | Index vault .md files (hash-based incremental, force option) |
+| `vault_search` | Search vault files (FTS5 or semantic, scope: vault/configs/all) |
+| `vault_related` | Find notes similar to a given note (embeddings or filename fallback) |
+| `vault_stats` | Vault health metrics (by module, status, inbox count, stale count) |
+| `federated_search` | RRF score fusion across vault, book-library, and session memory |
+
 ## Key Design Decisions
 
 → Full architecture: [`ref/architecture.md`](ref/architecture.md) | Data model: [`ref/data-model.md`](ref/data-model.md)
@@ -38,16 +48,21 @@ MCP server giving Claude persistent memory across sessions. Three categories (pe
 - **Markdown-first**: `data/memories/` is truth; DB is index
 - **Search routing**: 1-3 words → FTS5 (fast), 4+ → semantic (conceptual)
 - **Lazy embedding**: model loads only on first semantic search; server singleton shared across calls
-- **Model**: all-MiniLM-L6-v2 (384-dim), `min_similarity=0.35` threshold
+- **Model**: all-MiniLM-L6-v2 (384-dim), `min_similarity=0.35` threshold; numpy/torch are optional deps (`pip install .[embeddings]`)
 - **WAL mode**: enabled on all connections — concurrent reads + single writer, eliminates SQLITE_BUSY
 - **Error boundary**: `call_tool` wraps all dispatches — no tool failure can crash the MCP connection
 - **Async startup sync**: `sync_all()` runs in background after server accepts connections
+- **Thread safety**: `vault_index` creates a dedicated DB connection in `asyncio.to_thread()` — never shares the server's connection across threads
+- **Vault root**: configurable via `VAULT_ROOT` env var, defaults to `~/Dev/Obsidian-Second-Brain`
+- **Module detection**: `_detect_module()` in `tools/vault.py` — lowercased top-level folder name, excludes framework dirs (`.`, Daily, Inbox, Archive, Claude-Memory)
+- **Metadata key**: memories use `metadata["project"]` — queries use `json_extract(metadata, '$.project')`
 
 ## Commands
 ```bash
-pytest tests/ -v                    # all tests
-python -m claude_innit.server       # run MCP server
-pip install -e .                    # dev install
+.venv/bin/python -m pytest tests/ -v    # all tests (94 total)
+.venv/bin/python -m claude_innit.server # run MCP server
+pip install -e ".[embeddings,dev]"      # dev install with all deps
+pip install -e .                        # minimal install (no embeddings)
 ```
 
 ## Common Footguns
@@ -84,11 +99,18 @@ pip install -e .                    # dev install
 2. `admin_check_integrity`
 3. Inspect `data/innit.db` with sqlite3 if needed
 
-## Quick Read Order (Debugging)
-1. `claude_innit/server.py`
-2. `claude_innit/tools/search.py` + `claude_innit/db/database.py`
-3. `claude_innit/sync/markdown_sync.py`
-4. `tests/test_sync.py`, `tests/test_tools.py`
+## Key Files
+| File | Purpose |
+|------|---------|
+| `claude_innit/server.py` | MCP server, tool registration, async dispatch |
+| `claude_innit/db/database.py` | SQLite + FTS5 (memories + vault tables, triggers, integrity check) |
+| `claude_innit/db/embeddings.py` | Embedding generation + semantic search (optional numpy) |
+| `claude_innit/tools/vault.py` | VaultIndexer, vault_search, vault_related, vault_stats |
+| `claude_innit/tools/federation.py` | Federated search with RRF score fusion |
+| `claude_innit/tools/search.py` | Memory search routing (FTS5/semantic) |
+| `claude_innit/tools/memory.py` | remember/forget with markdown file sync |
+| `claude_innit/utils.py` | Shared utilities (parse_frontmatter) |
+| `claude_innit/sync/markdown_sync.py` | Markdown → DB sync engine |
 
 ## Documentation
 - Reference docs: `ref/` — tools, architecture, data model, development guide
@@ -103,4 +125,4 @@ pip install -e .                    # dev install
 
 ---
 
-*Last updated: 2026-03-04*
+*Last updated: 2026-03-09*
