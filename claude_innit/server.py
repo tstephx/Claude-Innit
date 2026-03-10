@@ -2,8 +2,11 @@
 
 import asyncio
 import json
+import logging
 from pathlib import Path
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
@@ -20,17 +23,30 @@ from claude_innit.tools import (
     save_session,
     check_integrity,
     list_memories,
+    vault_index,
+    vault_search,
+    vault_related,
+    vault_stats,
+    federated_search,
 )
 
 
 class InnitServer:
     """MCP server wrapper with tool registration."""
 
-    def __init__(self, server: Server, db: MemoryDatabase, sync: MarkdownSync, memories_dir: Path):
+    def __init__(
+        self,
+        server: Server,
+        db: MemoryDatabase,
+        sync: MarkdownSync,
+        memories_dir: Path,
+        vault_root: Optional[str] = None,
+    ):
         self.server = server
         self.db = db
         self.sync = sync
         self.memories_dir = memories_dir
+        self.vault_root = vault_root
         self.embedding_store = EmbeddingStore(db)
         self._tools = self._define_tools()
 
@@ -196,6 +212,119 @@ class InnitServer:
                     },
                 },
             ),
+            # --- OBF Vault Tools ---
+            Tool(
+                name="vault_index",
+                description=(
+                    "Index vault markdown files into the search database. "
+                    "Call this to update the vault search index after file changes. "
+                    "Skips unchanged files by default (hash-based). Use force=true to reindex everything."
+                ),
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "vault_root": {
+                            "type": "string",
+                            "description": "Path to the Obsidian vault root (overrides server default)",
+                        },
+                        "force": {
+                            "type": "boolean",
+                            "description": "Force reindex all files even if unchanged (default: false)",
+                        },
+                    },
+                },
+            ),
+            Tool(
+                name="vault_search",
+                description=(
+                    "Search vault files by keyword or concept. "
+                    "Use scope to narrow: 'vault' for vault notes, 'configs' for framework config files, 'all' for everything."
+                ),
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "query": {
+                            "type": "string",
+                            "description": "Search query",
+                        },
+                        "scope": {
+                            "type": "string",
+                            "enum": ["vault", "configs", "all"],
+                            "description": "Search scope (default: all)",
+                        },
+                        "limit": {
+                            "type": "integer",
+                            "description": "Max results (default: 20)",
+                        },
+                        "method": {
+                            "type": "string",
+                            "enum": ["auto", "text", "semantic"],
+                            "description": "Search method (default: auto — text for short queries, semantic for longer)",
+                        },
+                    },
+                    "required": ["query"],
+                },
+            ),
+            Tool(
+                name="vault_related",
+                description=(
+                    "Find notes related to a given note. "
+                    "Uses semantic similarity if embeddings exist, otherwise falls back to filename-based FTS."
+                ),
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "note_path": {
+                            "type": "string",
+                            "description": "Full path to the source note",
+                        },
+                        "limit": {
+                            "type": "integer",
+                            "description": "Max related notes to return (default: 10)",
+                        },
+                    },
+                    "required": ["note_path"],
+                },
+            ),
+            Tool(
+                name="vault_stats",
+                description=(
+                    "Return vault health metrics: total notes, notes by module, notes by status, "
+                    "inbox count, stale count, and index freshness."
+                ),
+                inputSchema={"type": "object", "properties": {}},
+            ),
+            Tool(
+                name="federated_search",
+                description=(
+                    "Search across vault, book library, and session memory simultaneously. "
+                    "Results are merged using reciprocal rank fusion with source weighting. "
+                    "Sources: vault (indexed vault files), books (book-library chapters), "
+                    "sessions (claude-innit memories), portfolio (materialized portfolio docs)."
+                ),
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "query": {
+                            "type": "string",
+                            "description": "Search query",
+                        },
+                        "sources": {
+                            "type": "array",
+                            "items": {
+                                "type": "string",
+                                "enum": ["vault", "books", "sessions", "portfolio"],
+                            },
+                            "description": "Which sources to search (default: all)",
+                        },
+                        "limit": {
+                            "type": "integer",
+                            "description": "Max results per source and in merged (default: 30)",
+                        },
+                    },
+                    "required": ["query"],
+                },
+            ),
         ]
 
     @property
@@ -227,7 +356,9 @@ class InnitServer:
                     embedding_store=self.embedding_store,
                 )
             elif name == "forget":
-                result = forget(self.db, arguments["memory_id"], memories_dir=self.memories_dir)
+                result = forget(
+                    self.db, arguments["memory_id"], memories_dir=self.memories_dir
+                )
             elif name == "save_session":
                 result = save_session(
                     self.db,
@@ -249,17 +380,67 @@ class InnitServer:
                     category=arguments.get("category"),
                     project=arguments.get("project"),
                 )
+            # --- OBF Vault Tools ---
+            elif name == "vault_index":
+                vr = arguments.get("vault_root") or self.vault_root
+                if not vr:
+                    result = {
+                        "error": "vault_root not configured — pass it as argument or set in server config"
+                    }
+                else:
+                    # Create a dedicated DB connection for the thread to avoid
+                    # sharing the main connection across threads (SQLite safety)
+                    def _threaded_vault_index():
+                        thread_db = MemoryDatabase(self.db.db_path)
+                        try:
+                            return vault_index(
+                                thread_db,
+                                vault_root=vr,
+                                force=arguments.get("force", False),
+                            )
+                        finally:
+                            thread_db.close()
+
+                    result = await asyncio.to_thread(_threaded_vault_index)
+            elif name == "vault_search":
+                result = vault_search(
+                    self.db,
+                    query=arguments["query"],
+                    scope=arguments.get("scope", "all"),
+                    limit=arguments.get("limit", 20),
+                    embedding_store=self.embedding_store,
+                    method=arguments.get("method", "auto"),
+                )
+            elif name == "vault_related":
+                result = vault_related(
+                    self.db,
+                    note_path=arguments["note_path"],
+                    limit=arguments.get("limit", 10),
+                    embedding_store=self.embedding_store,
+                )
+            elif name == "vault_stats":
+                result = vault_stats(self.db)
+            elif name == "federated_search":
+                result = federated_search(
+                    self.db,
+                    query=arguments["query"],
+                    sources=arguments.get("sources"),
+                    limit=arguments.get("limit", 30),
+                )
             else:
                 result = {"error": f"Unknown tool: {name}"}
         except Exception as e:
             result = {"error": type(e).__name__, "message": str(e), "tool": name}
 
-        return [TextContent(type="text", text=json.dumps(result, indent=2, default=str))]
+        return [
+            TextContent(type="text", text=json.dumps(result, indent=2, default=str))
+        ]
 
 
 def create_server(
     db_path: Path,
     memories_dir: Path,
+    vault_root: Optional[str] = None,
 ) -> InnitServer:
     """Create and configure the MCP server."""
     server = Server("claude-innit")
@@ -270,7 +451,7 @@ def create_server(
     # Sync is deferred to main() background task — do not block here
 
     # Create wrapper
-    innit_server = InnitServer(server, db, sync, memories_dir)
+    innit_server = InnitServer(server, db, sync, memories_dir, vault_root=vault_root)
 
     # Register handlers
     @server.list_tools()
@@ -289,17 +470,22 @@ async def _background_sync(sync: MarkdownSync) -> None:
     try:
         await asyncio.to_thread(sync.sync_all)
     except Exception:
-        pass  # Sync failure is non-fatal; server continues without it
+        logger.debug("Background sync failed", exc_info=True)
 
 
 async def main():
     """Run the MCP server."""
+    import os
+
     # Default paths
     base_dir = Path(__file__).parent.parent
     db_path = base_dir / "data" / "innit.db"
     memories_dir = base_dir / "data" / "memories"
+    vault_root = os.environ.get(
+        "VAULT_ROOT", str(Path.home() / "Dev" / "Obsidian-Second-Brain")
+    )
 
-    innit_server = create_server(db_path, memories_dir)
+    innit_server = create_server(db_path, memories_dir, vault_root=vault_root)
 
     async with stdio_server() as (read_stream, write_stream):
         # Defer sync to background — don't block initialize handshake
