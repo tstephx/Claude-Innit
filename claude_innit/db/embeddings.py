@@ -1,9 +1,14 @@
 """Embedding generation and semantic search."""
 
+from __future__ import annotations
+
 import struct
 from typing import Optional
 
-import numpy as np
+try:
+    import numpy as np
+except ImportError:
+    np = None  # type: ignore[assignment]
 
 from claude_innit.db.database import MemoryDatabase
 
@@ -20,12 +25,17 @@ class EmbeddingStore:
         """Lazy-load the embedding model."""
         if self._model is None:
             from sentence_transformers import SentenceTransformer
+
             # Force CPU to avoid MPS issues
             self._model = SentenceTransformer("all-MiniLM-L6-v2", device="cpu")
         return self._model
 
     def generate(self, text: str) -> np.ndarray:
         """Generate embedding for text."""
+        if np is None:
+            raise ImportError(
+                "numpy is required for embeddings — install with: pip install claude-innit[embeddings]"
+            )
         model = self._get_model()
         embedding = model.encode(text, convert_to_tensor=False)
         return np.array(embedding, dtype=np.float32)
@@ -45,7 +55,7 @@ class EmbeddingStore:
             """,
             (memory_id, blob, "all-MiniLM-L6-v2"),
         )
-        self.db._conn.commit()
+        self.db.commit()
 
     def get_embedding(self, memory_id: str) -> Optional[np.ndarray]:
         """Get embedding for a memory."""
@@ -61,7 +71,9 @@ class EmbeddingStore:
             return self._blob_to_embedding(row[0])
         return None
 
-    def semantic_search(self, query: str, limit: int = 10, min_similarity: float = 0.35) -> list[dict]:
+    def semantic_search(
+        self, query: str, limit: int = 10, min_similarity: float = 0.35
+    ) -> list[dict]:
         """Search memories by semantic similarity."""
         if self.db is None:
             return []

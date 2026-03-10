@@ -41,7 +41,7 @@ def get_context(
             """
             SELECT * FROM memories
             WHERE category = 'project'
-            AND json_extract(metadata, '$.name') = ?
+            AND json_extract(metadata, '$.project') = ?
             """,
             (project,),
         ).fetchall()

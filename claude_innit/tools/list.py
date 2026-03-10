@@ -31,7 +31,7 @@ def list_memories(
             """
             SELECT id, content, category, updated_at FROM memories
             WHERE category = 'project'
-            AND json_extract(metadata, '$.name') = ?
+            AND json_extract(metadata, '$.project') = ?
             ORDER BY updated_at DESC
             LIMIT ?
             """,
@@ -61,10 +61,12 @@ def list_memories(
     for row in rows:
         content = row["content"]
         preview = content[:80] + "..." if len(content) > 80 else content
-        results.append({
-            "id": row["id"],
-            "preview": preview,
-            "category": row["category"],
-            "updated_at": row["updated_at"],
-        })
+        results.append(
+            {
+                "id": row["id"],
+                "preview": preview,
+                "category": row["category"],
+                "updated_at": row["updated_at"],
+            }
+        )
     return results

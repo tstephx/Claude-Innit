@@ -1,8 +1,11 @@
 """Memory management tools."""
 
+import logging
 import uuid
 from pathlib import Path
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 import yaml
 
@@ -10,7 +13,9 @@ from claude_innit.db.database import MemoryDatabase
 from claude_innit.db.embeddings import EmbeddingStore
 
 
-def _write_memory_markdown(memories_dir: Path, memory_id: str, content: str, metadata: dict) -> None:
+def _write_memory_markdown(
+    memories_dir: Path, memory_id: str, content: str, metadata: dict
+) -> None:
     """Write a memory markdown file to the memories directory."""
     file_path = memories_dir / f"{memory_id}.md"
     file_path.parent.mkdir(parents=True, exist_ok=True)
@@ -78,17 +83,25 @@ def remember(
 
         if generate_embedding:
             try:
-                store = embedding_store if embedding_store is not None else EmbeddingStore(db)
+                store = (
+                    embedding_store
+                    if embedding_store is not None
+                    else EmbeddingStore(db)
+                )
                 store.store_embedding(memory_id, content)
             except Exception:
-                pass  # Embedding is optional; memory is still stored
+                logger.debug(
+                    "Embedding generation failed for %s", memory_id, exc_info=True
+                )
 
         return {"success": True, "memory_id": memory_id}
     except Exception as e:
         return {"success": False, "error": str(e)}
 
 
-def forget(db: MemoryDatabase, memory_id: str, memories_dir: Optional[Path] = None) -> dict:
+def forget(
+    db: MemoryDatabase, memory_id: str, memories_dir: Optional[Path] = None
+) -> dict:
     """
     Remove a memory permanently.
 
@@ -111,7 +124,10 @@ def forget(db: MemoryDatabase, memory_id: str, memories_dir: Optional[Path] = No
         db.delete_memory(memory_id)
 
         if memories_dir is None:
-            return {"success": True, "warning": "memories_dir not provided; markdown file was not deleted and may be re-inserted on next sync"}
+            return {
+                "success": True,
+                "warning": "memories_dir not provided; markdown file was not deleted and may be re-inserted on next sync",
+            }
         return {"success": True}
     except Exception as e:
         return {"success": False, "error": str(e)}

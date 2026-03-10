@@ -1,19 +1,18 @@
 """Sync markdown files to database."""
 
-import re
+import logging
 from pathlib import Path
 from typing import Optional
 
-import yaml
-
 from claude_innit.db.database import MemoryDatabase
 from claude_innit.db.embeddings import EmbeddingStore
+from claude_innit.utils import parse_frontmatter
+
+logger = logging.getLogger(__name__)
 
 
 class MarkdownSync:
     """Syncs markdown files to database with optional embeddings."""
-
-    FRONTMATTER_PATTERN = re.compile(r"^---\s*\n(.*?)\n---\s*\n", re.DOTALL)
 
     def __init__(
         self,
@@ -36,19 +35,8 @@ class MarkdownSync:
     def parse_markdown(self, file_path: Path) -> tuple[dict, str]:
         """Parse markdown file, extracting frontmatter and content."""
         text = file_path.read_text()
-
-        frontmatter = {}
-        content = text
-
-        match = self.FRONTMATTER_PATTERN.match(text)
-        if match:
-            try:
-                frontmatter = yaml.safe_load(match.group(1)) or {}
-            except yaml.YAMLError:
-                pass
-            content = text[match.end():]
-
-        return frontmatter, content.strip()
+        frontmatter, body = parse_frontmatter(text)
+        return frontmatter, body.strip()
 
     def detect_category(self, file_path: Path) -> str:
         """Detect category from file path."""
@@ -90,7 +78,7 @@ class MarkdownSync:
 
             return True
         except Exception as e:
-            print(f"Error syncing {file_path}: {e}")
+            logger.debug("Error syncing %s: %s", file_path, e)
             return False
 
     def sync_all(self) -> dict:

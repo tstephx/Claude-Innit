@@ -39,13 +39,13 @@ class TestGetContext:
             id="projects/book-mcp.md",
             category="project",
             content="Book MCP Server project",
-            metadata={"name": "book-mcp-server"},
+            metadata={"project": "book-mcp-server"},
         )
         db.insert_memory(
             id="projects/other.md",
             category="project",
             content="Other project",
-            metadata={"name": "other"},
+            metadata={"project": "other"},
         )
 
         result = get_context(db, project="book-mcp-server")
@@ -57,9 +57,18 @@ class TestGetContext:
     def test_get_context_output_shape(self, tmp_path):
         """get_context returns dict with list values having required keys."""
         db = MemoryDatabase(tmp_path / "test.db")
-        db.insert_memory(id="personal/x1", category="personal", content="I am Taylor", metadata={})
-        db.insert_memory(id="project/y1", category="project", content="myapp state", metadata={"name": "myapp"})
-        db.insert_memory(id="session/z1", category="session", content="session summary", metadata={})
+        db.insert_memory(
+            id="personal/x1", category="personal", content="I am Taylor", metadata={}
+        )
+        db.insert_memory(
+            id="project/y1",
+            category="project",
+            content="myapp state",
+            metadata={"project": "myapp"},
+        )
+        db.insert_memory(
+            id="session/z1", category="session", content="session summary", metadata={}
+        )
 
         result = get_context(db)
 
@@ -80,7 +89,12 @@ class TestGetContext:
     def test_get_context_fallback_to_all_sessions(self, tmp_path):
         """When project filter returns no sessions, falls back to all sessions."""
         db = MemoryDatabase(tmp_path / "test.db")
-        db.insert_memory(id="session/1", category="session", content="unrelated session", metadata={"project": "other"})
+        db.insert_memory(
+            id="session/1",
+            category="session",
+            content="unrelated session",
+            metadata={"project": "other"},
+        )
 
         result = get_context(db, project="myapp")
 
@@ -403,7 +417,9 @@ class TestForgetDurability:
 
         # Simulate server restart (new db + sync)
         db2 = MemoryDatabase(tmp_path / "test.db")
-        sync = MarkdownSync(tmp_path / "test.db", memories_dir, generate_embeddings=False)
+        sync = MarkdownSync(
+            tmp_path / "test.db", memories_dir, generate_embeddings=False
+        )
         sync.sync_all()
 
         assert db2.get_memory(memory_id) is None
@@ -415,9 +431,20 @@ class TestListMemories:
     def test_lists_all_memories(self, tmp_path):
         """list_memories returns all memories with id, preview, category, updated_at."""
         from claude_innit.tools.list import list_memories
+
         db = MemoryDatabase(tmp_path / "test.db")
-        db.insert_memory(id="personal/a1", category="personal", content="I prefer dark mode", metadata={})
-        db.insert_memory(id="project/b2", category="project", content="Using adapter pattern", metadata={"name": "myapp"})
+        db.insert_memory(
+            id="personal/a1",
+            category="personal",
+            content="I prefer dark mode",
+            metadata={},
+        )
+        db.insert_memory(
+            id="project/b2",
+            category="project",
+            content="Using adapter pattern",
+            metadata={"project": "myapp"},
+        )
 
         result = list_memories(db)
 
@@ -435,9 +462,14 @@ class TestListMemories:
     def test_filters_by_category(self, tmp_path):
         """list_memories filters by category."""
         from claude_innit.tools.list import list_memories
+
         db = MemoryDatabase(tmp_path / "test.db")
-        db.insert_memory(id="personal/a1", category="personal", content="personal thing", metadata={})
-        db.insert_memory(id="project/b2", category="project", content="project thing", metadata={})
+        db.insert_memory(
+            id="personal/a1", category="personal", content="personal thing", metadata={}
+        )
+        db.insert_memory(
+            id="project/b2", category="project", content="project thing", metadata={}
+        )
 
         result = list_memories(db, category="personal")
 
@@ -447,9 +479,20 @@ class TestListMemories:
     def test_filters_by_project(self, tmp_path):
         """list_memories filters project memories by project name."""
         from claude_innit.tools.list import list_memories
+
         db = MemoryDatabase(tmp_path / "test.db")
-        db.insert_memory(id="project/a1", category="project", content="myapp memory", metadata={"name": "myapp"})
-        db.insert_memory(id="project/b2", category="project", content="other memory", metadata={"name": "other"})
+        db.insert_memory(
+            id="project/a1",
+            category="project",
+            content="myapp memory",
+            metadata={"project": "myapp"},
+        )
+        db.insert_memory(
+            id="project/b2",
+            category="project",
+            content="other memory",
+            metadata={"project": "other"},
+        )
 
         result = list_memories(db, project="myapp")
 
@@ -459,9 +502,12 @@ class TestListMemories:
     def test_preview_is_truncated(self, tmp_path):
         """Preview is max 80 chars + ellipsis."""
         from claude_innit.tools.list import list_memories
+
         db = MemoryDatabase(tmp_path / "test.db")
         long_content = "x" * 200
-        db.insert_memory(id="personal/a1", category="personal", content=long_content, metadata={})
+        db.insert_memory(
+            id="personal/a1", category="personal", content=long_content, metadata={}
+        )
 
         result = list_memories(db)
 
