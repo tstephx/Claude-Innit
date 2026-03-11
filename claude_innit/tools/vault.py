@@ -62,6 +62,7 @@ class VaultIndexer:
             "__pycache__/",
             ".pytest_cache/",
             ".venv/",
+            "venv/",
             ".brain/tests/",
         ]
 

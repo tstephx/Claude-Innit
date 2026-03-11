@@ -41,12 +41,14 @@ class InnitServer:
         sync: MarkdownSync,
         memories_dir: Path,
         vault_root: Optional[str] = None,
+        extra_index_paths: Optional[list[str]] = None,
     ):
         self.server = server
         self.db = db
         self.sync = sync
         self.memories_dir = memories_dir
         self.vault_root = vault_root
+        self.extra_index_paths = extra_index_paths or []
         self.embedding_store = EmbeddingStore(db)
         # Pre-load embedding model to avoid MCP timeout on first semantic query
         try:
@@ -401,6 +403,7 @@ class InnitServer:
                             result = vault_index(
                                 thread_db,
                                 vault_root=vr,
+                                extra_paths=self.extra_index_paths,
                                 force=arguments.get("force", False),
                             )
                             cleaned = thread_db.cleanup_orphan_vault_embeddings()
@@ -454,6 +457,7 @@ def create_server(
     db_path: Path,
     memories_dir: Path,
     vault_root: Optional[str] = None,
+    extra_index_paths: Optional[list[str]] = None,
 ) -> InnitServer:
     """Create and configure the MCP server."""
     server = Server("claude-innit")
@@ -464,7 +468,14 @@ def create_server(
     # Sync is deferred to main() background task — do not block here
 
     # Create wrapper
-    innit_server = InnitServer(server, db, sync, memories_dir, vault_root=vault_root)
+    innit_server = InnitServer(
+        server,
+        db,
+        sync,
+        memories_dir,
+        vault_root=vault_root,
+        extra_index_paths=extra_index_paths,
+    )
 
     # Register handlers
     @server.list_tools()
@@ -498,7 +509,22 @@ async def main():
         "VAULT_ROOT", str(Path.home() / "Dev" / "Obsidian-Second-Brain")
     )
 
-    innit_server = create_server(db_path, memories_dir, vault_root=vault_root)
+    # Extra directories to index alongside the vault (markdown files only)
+    extra_index_paths = (
+        os.environ.get("EXTRA_INDEX_PATHS", "").split(":")
+        if os.environ.get("EXTRA_INDEX_PATHS")
+        else [
+            str(Path.home() / "Dev" / "_Lab"),
+            str(Path.home() / "Dev" / "_Projects"),
+        ]
+    )
+
+    innit_server = create_server(
+        db_path,
+        memories_dir,
+        vault_root=vault_root,
+        extra_index_paths=extra_index_paths,
+    )
 
     async with stdio_server() as (read_stream, write_stream):
         # Defer sync to background — don't block initialize handshake
