@@ -36,7 +36,10 @@ def _search_books(
         # Read-only: avoid blocking the book-library MCP
         conn.execute("PRAGMA query_only = ON")
 
-        safe_query = '"' + query.replace('"', '""') + '"'
+        import re
+
+        words = re.findall(r"\w+", query)
+        safe_query = " ".join(f'"{w}"' for w in words) if words else query
         rows = conn.execute(
             """
             SELECT

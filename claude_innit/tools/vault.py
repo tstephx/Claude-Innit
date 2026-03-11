@@ -277,8 +277,9 @@ def vault_related(
             results = vault_semantic_search(
                 embedding_store, vault_file["content"][:500], limit=limit + 1
             )
-            # Exclude the source note itself
-            return [r for r in results if r["file_path"] != note_path][:limit]
+            filtered = [r for r in results if r["file_path"] != note_path][:limit]
+            if filtered:
+                return filtered
         except Exception:
             pass
 

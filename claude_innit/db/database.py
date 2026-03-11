@@ -167,8 +167,10 @@ class MemoryDatabase:
 
     def fts_search(self, query: str, limit: int = 10) -> list[dict]:
         """Search memories using FTS5. Sanitizes query to prevent operator injection."""
-        # Wrap in double-quotes to treat entire query as a phrase, escaping internal quotes
-        safe_query = '"' + query.replace('"', '""') + '"'
+        import re
+
+        words = re.findall(r"\w+", query)
+        safe_query = " ".join(f'"{w}"' for w in words) if words else query
         try:
             rows = self._conn.execute(
                 """
@@ -216,7 +218,7 @@ class MemoryDatabase:
                 filename,
                 content,
                 content_hash,
-                json.dumps(frontmatter or {}),
+                json.dumps(frontmatter or {}, default=str),
                 module,
                 file_size,
                 modified_at,
@@ -250,7 +252,11 @@ class MemoryDatabase:
         self, query: str, limit: int = 20, module: Optional[str] = None
     ) -> list[dict]:
         """Search vault files using FTS5. Sanitizes query to prevent operator injection."""
-        safe_query = '"' + query.replace('"', '""') + '"'
+        # Strip FTS5 operators and join words with implicit AND
+        import re
+
+        words = re.findall(r"\w+", query)
+        safe_query = " ".join(f'"{w}"' for w in words) if words else query
         try:
             if module:
                 rows = self._conn.execute(
