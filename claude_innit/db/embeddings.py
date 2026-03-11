@@ -30,6 +30,10 @@ class EmbeddingStore:
             self._model = SentenceTransformer("all-MiniLM-L6-v2", device="cpu")
         return self._model
 
+    def warm(self) -> None:
+        """Pre-load the embedding model. Call at server startup to avoid timeout on first query."""
+        self._get_model()
+
     def generate(self, text: str) -> np.ndarray:
         """Generate embedding for text."""
         if np is None:

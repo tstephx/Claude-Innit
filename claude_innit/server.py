@@ -48,6 +48,11 @@ class InnitServer:
         self.memories_dir = memories_dir
         self.vault_root = vault_root
         self.embedding_store = EmbeddingStore(db)
+        # Pre-load embedding model to avoid MCP timeout on first semantic query
+        try:
+            self.embedding_store.warm()
+        except Exception:
+            pass  # Embeddings optional — degrade gracefully if torch missing
         self._tools = self._define_tools()
 
     def _define_tools(self) -> list[Tool]:
@@ -393,24 +398,32 @@ class InnitServer:
                     def _threaded_vault_index():
                         thread_db = MemoryDatabase(self.db.db_path)
                         try:
-                            return vault_index(
+                            result = vault_index(
                                 thread_db,
                                 vault_root=vr,
                                 force=arguments.get("force", False),
                             )
+                            cleaned = thread_db.cleanup_orphan_vault_embeddings()
+                            result["orphan_embeddings_cleaned"] = cleaned
+                            return result
                         finally:
                             thread_db.close()
 
                     result = await asyncio.to_thread(_threaded_vault_index)
             elif name == "vault_search":
-                result = vault_search(
-                    self.db,
-                    query=arguments["query"],
-                    scope=arguments.get("scope", "all"),
-                    limit=arguments.get("limit", 20),
-                    embedding_store=self.embedding_store,
-                    method=arguments.get("method", "auto"),
-                )
+                try:
+                    result = vault_search(
+                        self.db,
+                        query=arguments["query"],
+                        scope=arguments.get("scope", "all"),
+                        limit=arguments.get("limit", 20),
+                        embedding_store=self.embedding_store,
+                        method=arguments.get("method", "auto"),
+                    )
+                except ValueError as e:
+                    return [
+                        TextContent(type="text", text=json.dumps({"error": str(e)}))
+                    ]
             elif name == "vault_related":
                 result = vault_related(
                     self.db,
@@ -419,7 +432,7 @@ class InnitServer:
                     embedding_store=self.embedding_store,
                 )
             elif name == "vault_stats":
-                result = vault_stats(self.db)
+                result = vault_stats(self.db, embedding_store=self.embedding_store)
             elif name == "federated_search":
                 result = federated_search(
                     self.db,

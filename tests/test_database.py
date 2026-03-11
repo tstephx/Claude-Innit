@@ -76,7 +76,9 @@ def test_wal_mode_enabled(tmp_path):
 def test_delete_memory(tmp_path):
     """delete_memory removes record and embeddings atomically."""
     db = MemoryDatabase(tmp_path / "test.db")
-    db.insert_memory(id="test/abc", category="personal", content="to delete", metadata={})
+    db.insert_memory(
+        id="test/abc", category="personal", content="to delete", metadata={}
+    )
     # Insert a fake embedding to verify it gets cleaned up too
     db._conn.execute(
         "INSERT INTO embeddings (memory_id, embedding, model) VALUES (?, ?, ?)",
@@ -99,16 +101,90 @@ def test_delete_memory_nonexistent_is_noop(tmp_path):
     db.delete_memory("does/not/exist")  # should not raise
 
 
-@pytest.mark.parametrize("bad_query", [
-    '"unclosed quote',
-    "OR AND NOT",
-    "term*wildcard",
-    "hello OR",
-])
+def test_cleanup_orphan_vault_embeddings(tmp_path):
+    """Should remove vault_embeddings rows with no matching vault_file."""
+    import numpy as np
+
+    db = MemoryDatabase(tmp_path / "test.db")
+
+    # Insert a vault file and embedding
+    db.upsert_vault_file("/test/real.md", "real.md", "content", "hash1", module="test")
+    real_id = db.get_vault_file("/test/real.md")["file_id"]
+    blob = np.zeros(384, dtype=np.float32).tobytes()
+    db.execute(
+        "INSERT INTO vault_embeddings (file_id, embedding, model) VALUES (?, ?, ?)",
+        (real_id, blob, "test-model"),
+    )
+
+    # Insert an orphan embedding (file_id 9999 doesn't exist)
+    db.execute(
+        "INSERT INTO vault_embeddings (file_id, embedding, model) VALUES (?, ?, ?)",
+        (9999, blob, "test-model"),
+    )
+    db.commit()
+
+    # Verify orphan exists
+    count = db.execute("SELECT COUNT(*) FROM vault_embeddings").fetchone()[0]
+    assert count == 2
+
+    # Clean up
+    removed = db.cleanup_orphan_vault_embeddings()
+    assert removed == 1
+
+    # Only real embedding remains
+    count = db.execute("SELECT COUNT(*) FROM vault_embeddings").fetchone()[0]
+    assert count == 1
+
+
+def test_vault_embedding_stats(tmp_path):
+    """vault_embedding_stats returns correct metrics."""
+    import numpy as np
+
+    db = MemoryDatabase(tmp_path / "test.db")
+
+    # Empty state
+    stats = db.vault_embedding_stats()
+    assert stats["total"] == 0
+    assert stats["orphaned"] == 0
+    assert stats["missing"] == 0
+    assert stats["model"] is None
+
+    # Add file + embedding
+    db.upsert_vault_file("/a.md", "a.md", "content", "h1")
+    file_id = db.get_vault_file("/a.md")["file_id"]
+    blob = np.zeros(384, dtype=np.float32).tobytes()
+    db.execute(
+        "INSERT INTO vault_embeddings (file_id, embedding, model) VALUES (?, ?, ?)",
+        (file_id, blob, "all-MiniLM-L6-v2"),
+    )
+
+    # Add file without embedding
+    db.upsert_vault_file("/b.md", "b.md", "content2", "h2")
+    db.commit()
+
+    stats = db.vault_embedding_stats()
+    assert stats["total"] == 1
+    assert stats["with_embeddings"] == 1
+    assert stats["missing"] == 1
+    assert stats["orphaned"] == 0
+    assert stats["model"] == "all-MiniLM-L6-v2"
+
+
+@pytest.mark.parametrize(
+    "bad_query",
+    [
+        '"unclosed quote',
+        "OR AND NOT",
+        "term*wildcard",
+        "hello OR",
+    ],
+)
 def test_fts_search_handles_special_chars(tmp_path, bad_query):
     """fts_search does not raise on FTS5 operator characters."""
     db = MemoryDatabase(tmp_path / "test.db")
-    db.insert_memory(id="test/1", category="personal", content="normal content", metadata={})
+    db.insert_memory(
+        id="test/1", category="personal", content="normal content", metadata={}
+    )
 
     # Should not raise sqlite3.OperationalError
     result = db.fts_search(bad_query)

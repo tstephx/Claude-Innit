@@ -329,6 +329,43 @@ class MemoryDatabase:
         ).fetchall()
         return [dict(row) for row in rows]
 
+    def vault_embedding_stats(self) -> dict:
+        """Return embedding coverage metrics for vault files."""
+        total = self._conn.execute("SELECT COUNT(*) FROM vault_embeddings").fetchone()[
+            0
+        ]
+        orphaned = self._conn.execute(
+            "SELECT COUNT(*) FROM vault_embeddings ve "
+            "LEFT JOIN vault_files vf ON ve.file_id = vf.file_id "
+            "WHERE vf.file_id IS NULL"
+        ).fetchone()[0]
+        with_embeddings = self._conn.execute(
+            "SELECT COUNT(*) FROM vault_files vf "
+            "JOIN vault_embeddings ve ON vf.file_id = ve.file_id"
+        ).fetchone()[0]
+        total_files = self._conn.execute("SELECT COUNT(*) FROM vault_files").fetchone()[
+            0
+        ]
+        model = self._conn.execute(
+            "SELECT DISTINCT model FROM vault_embeddings LIMIT 1"
+        ).fetchone()
+        return {
+            "total": total,
+            "orphaned": orphaned,
+            "with_embeddings": with_embeddings,
+            "missing": total_files - with_embeddings,
+            "model": model[0] if model else None,
+        }
+
+    def cleanup_orphan_vault_embeddings(self) -> int:
+        """Remove vault_embeddings rows with no matching vault_files entry."""
+        cursor = self._conn.execute(
+            "DELETE FROM vault_embeddings WHERE file_id NOT IN "
+            "(SELECT file_id FROM vault_files)"
+        )
+        self._conn.commit()
+        return cursor.rowcount
+
     def integrity_check(self, auto_repair: bool = True) -> dict:
         """Check database integrity and optionally repair issues.
 

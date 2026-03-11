@@ -277,6 +277,37 @@ class TestVaultStats:
         assert stats["index_age_seconds"] == -1.0
 
 
+class TestVaultStatsEmbeddings:
+    def test_stats_includes_embedding_health(self, db, vault_dir):
+        from claude_innit.db.embeddings import EmbeddingStore
+
+        vault_index(db, vault_root=str(vault_dir))
+        stats = vault_stats(db, embedding_store=EmbeddingStore(db))
+
+        assert "embeddings" in stats
+        emb = stats["embeddings"]
+        assert "total" in emb
+        assert "orphaned" in emb
+        assert "missing" in emb
+        assert "model" in emb
+        assert "self_test" in emb
+        assert emb["self_test"] in ("pass", "fail", "unavailable")
+
+    def test_stats_embeddings_without_store(self, db, vault_dir):
+        vault_index(db, vault_root=str(vault_dir))
+        stats = vault_stats(db)
+
+        assert "embeddings" in stats
+        assert stats["embeddings"]["self_test"] == "unavailable"
+
+
+class TestVaultSearchFailLoud:
+    def test_semantic_fails_without_store(self, db, vault_dir):
+        vault_index(db, vault_root=str(vault_dir))
+        with pytest.raises(ValueError, match="[Ss]emantic search.*unavailable"):
+            vault_search(db, "test query", method="semantic", embedding_store=None)
+
+
 class TestDatabaseVaultMethods:
     def test_upsert_and_get(self, db):
         db.upsert_vault_file(

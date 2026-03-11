@@ -207,7 +207,10 @@ def vault_search(
 
     elif method == "semantic":
         if embedding_store is None:
-            embedding_store = EmbeddingStore(db)
+            raise ValueError(
+                "Semantic search unavailable: no embedding store configured. "
+                "Run vault_index to generate embeddings."
+            )
         return vault_semantic_search(embedding_store, query, limit=limit)
 
     return []
@@ -284,12 +287,15 @@ def vault_related(
     return [r for r in results if r["file_path"] != note_path][:limit]
 
 
-def vault_stats(db: MemoryDatabase) -> dict:
+def vault_stats(
+    db: MemoryDatabase, embedding_store: Optional[EmbeddingStore] = None
+) -> dict:
     """Return vault health metrics.
 
     Returns: {"total_notes": int, "by_module": dict, "by_status": dict,
-              "inbox_count": int, "stale_count": int, "orphan_estimate": int,
-              "index_age_seconds": float, "last_indexed": str}
+              "inbox_count": int, "stale_count": int,
+              "index_age_seconds": float, "last_indexed": str,
+              "embeddings": dict}
     """
     total = db.vault_file_count()
     by_module = db.vault_files_by_module()
@@ -320,6 +326,17 @@ def vault_stats(db: MemoryDatabase) -> dict:
     except Exception:
         logger.debug("Error computing index age", exc_info=True)
 
+    # Embedding health
+    emb_stats = db.vault_embedding_stats()
+    self_test = "unavailable"
+    if embedding_store is not None:
+        try:
+            vec = embedding_store.generate("self-test query")
+            self_test = "pass" if vec is not None and len(vec) == 384 else "fail"
+        except Exception:
+            self_test = "fail"
+    emb_stats["self_test"] = self_test
+
     return {
         "total_notes": total,
         "by_module": by_module,
@@ -328,4 +345,5 @@ def vault_stats(db: MemoryDatabase) -> dict:
         "stale_count": stale_count,
         "index_age_seconds": index_age_seconds,
         "last_indexed": last_indexed,
+        "embeddings": emb_stats,
     }
