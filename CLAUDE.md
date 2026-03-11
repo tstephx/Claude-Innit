@@ -38,7 +38,7 @@ MCP server giving Claude persistent memory across sessions. Three categories (pe
 | `vault_index` | Index vault .md files (hash-based incremental, force option) |
 | `vault_search` | Search vault files (FTS5 or semantic, scope: vault/configs/all) |
 | `vault_related` | Find notes similar to a given note (embeddings or filename fallback) |
-| `vault_stats` | Vault health metrics (by module, status, inbox count, stale count) |
+| `vault_stats` | Vault health metrics (by module, status, inbox count, stale count, embedding health) |
 | `federated_search` | RRF score fusion across vault, book-library, and session memory |
 
 ## Key Design Decisions
@@ -47,19 +47,22 @@ MCP server giving Claude persistent memory across sessions. Three categories (pe
 
 - **Markdown-first**: `data/memories/` is truth; DB is index
 - **Search routing**: 1-3 words → FTS5 (fast), 4+ → semantic (conceptual)
-- **Lazy embedding**: model loads only on first semantic search; server singleton shared across calls
+- **Eager embedding**: `EmbeddingStore.warm()` pre-loads model at server startup to avoid MCP timeout on first semantic query
 - **Model**: all-MiniLM-L6-v2 (384-dim), `min_similarity=0.35` threshold; numpy/torch are optional deps (`pip install .[embeddings]`)
 - **WAL mode**: enabled on all connections — concurrent reads + single writer, eliminates SQLITE_BUSY
 - **Error boundary**: `call_tool` wraps all dispatches — no tool failure can crash the MCP connection
 - **Async startup sync**: `sync_all()` runs in background after server accepts connections
 - **Thread safety**: `vault_index` creates a dedicated DB connection in `asyncio.to_thread()` — never shares the server's connection across threads
 - **Vault root**: configurable via `VAULT_ROOT` env var, defaults to `~/Dev/Obsidian-Second-Brain`
+- **Extra index paths**: `EXTRA_INDEX_PATHS` env var (colon-separated), defaults to `~/Dev/_Lab:~/Dev/_Projects` — indexed alongside vault on `vault_index`
+- **Fail-loud semantic**: `vault_search(method="semantic")` raises `ValueError` when no embedding store, instead of returning empty results
+- **Orphan cleanup**: `vault_index` auto-cleans orphaned vault embeddings after each run
 - **Module detection**: `_detect_module()` in `tools/vault.py` — lowercased top-level folder name, excludes framework dirs (`.`, Daily, Inbox, Archive, Claude-Memory)
 - **Metadata key**: memories use `metadata["project"]` — queries use `json_extract(metadata, '$.project')`
 
 ## Commands
 ```bash
-.venv/bin/python -m pytest tests/ -v    # all tests (94 total)
+.venv/bin/python -m pytest tests/ -v    # all tests (100 total)
 .venv/bin/python -m claude_innit.server # run MCP server
 pip install -e ".[embeddings,dev]"      # dev install with all deps
 pip install -e .                        # minimal install (no embeddings)
@@ -72,7 +75,7 @@ pip install -e .                        # minimal install (no embeddings)
 | Problem | Fix |
 |---------|-----|
 | DB locked / SQLITE_BUSY | Stop concurrent runs; WAL mode makes this rare now |
-| Semantic search slow first time | Expected — embedding model lazy-loads |
+| Semantic search slow first time | Should be rare now — `warm()` pre-loads at startup. If still slow, check model cache |
 | Memory comes back after forget() | File wasn't deleted — use `forget()` via MCP (passes memories_dir) |
 | Memories out of sync | `admin_sync` then `admin_check_integrity` |
 
@@ -125,4 +128,4 @@ pip install -e .                        # minimal install (no embeddings)
 
 ---
 
-*Last updated: 2026-03-09*
+*Last updated: 2026-03-11*
