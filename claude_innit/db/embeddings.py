@@ -100,6 +100,59 @@ class EmbeddingStore:
         results.sort(key=lambda x: x["similarity"], reverse=True)
         return results[:limit]
 
+    def store_vault_embedding(self, file_id: int, text: str) -> None:
+        """Generate and store embedding for a vault file."""
+        if self.db is None:
+            raise ValueError("Database required for storage")
+
+        embedding = self.generate(text)
+        blob = self._embedding_to_blob(embedding)
+
+        self.db.execute(
+            """
+            INSERT OR REPLACE INTO vault_embeddings (file_id, embedding, model)
+            VALUES (?, ?, ?)
+            """,
+            (file_id, blob, "all-MiniLM-L6-v2"),
+        )
+        self.db.commit()
+
+    def batch_store_vault_embeddings(self, limit: int = 0) -> dict:
+        """Generate embeddings for vault files that don't have them yet.
+
+        Args:
+            limit: Max files to process (0 = all)
+
+        Returns: {"generated": int, "skipped": int, "errors": int}
+        """
+        if self.db is None:
+            raise ValueError("Database required for storage")
+
+        query = """
+            SELECT vf.file_id, vf.content, vf.filename
+            FROM vault_files vf
+            LEFT JOIN vault_embeddings ve ON vf.file_id = ve.file_id
+            WHERE ve.file_id IS NULL
+        """
+        if limit > 0:
+            query += f" LIMIT {limit}"
+
+        rows = self.db.execute(query).fetchall()
+        stats = {"generated": 0, "skipped": 0, "errors": 0}
+
+        for row in rows:
+            text = row["content"][:500] if row["content"] else ""
+            if not text.strip():
+                stats["skipped"] += 1
+                continue
+            try:
+                self.store_vault_embedding(row["file_id"], text)
+                stats["generated"] += 1
+            except Exception:
+                stats["errors"] += 1
+
+        return stats
+
     def _embedding_to_blob(self, embedding: np.ndarray) -> bytes:
         """Convert numpy array to bytes."""
         return embedding.tobytes()
