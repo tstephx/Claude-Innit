@@ -24,8 +24,8 @@ def _detect_module(file_path: str, vault_root: str) -> Optional[str]:
     """Detect which module a file belongs to from its path.
 
     Convention: files under `<vault_root>/<module_name>/` belong to that module.
-    Files at vault root or in framework dirs (.brain/, .claude/, Daily/, Inbox/)
-    return None.
+    Files at vault root return None. Dot-prefixed framework dirs (.brain/, .claude/)
+    are excluded from indexing via exclude_patterns, not here.
     """
     try:
         rel = Path(file_path).relative_to(vault_root)
@@ -37,14 +37,6 @@ def _detect_module(file_path: str, vault_root: str) -> Optional[str]:
         return None
 
     first_dir = parts[0]
-    # Framework dirs are not modules — they hold cross-module or framework content
-    if first_dir.startswith(".") or first_dir in (
-        "Daily",
-        "Inbox",
-        "Archive",
-        "Claude-Memory",
-    ):
-        return None
     # Return lowercased for consistent module naming regardless of filesystem casing
     return first_dir.lower()
 
@@ -65,9 +57,12 @@ class VaultIndexer:
         self.exclude_patterns = exclude_patterns or [
             "node_modules/",
             ".git/",
-            ".obsidian/workspace",
+            ".obsidian/",
             ".DS_Store",
             "__pycache__/",
+            ".pytest_cache/",
+            ".venv/",
+            ".brain/tests/",
         ]
 
     def _should_exclude(self, path: Path) -> bool:
