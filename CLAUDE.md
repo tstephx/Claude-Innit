@@ -114,12 +114,13 @@ pip install -e .                        # minimal install (no embeddings)
 |------|---------|
 | `claude_innit/server.py` | MCP server, tool registration, async dispatch |
 | `claude_innit/db/database.py` | SQLite + FTS5 (memories + vault tables, triggers, integrity check) |
-| `claude_innit/db/embeddings.py` | Embedding generation + semantic search (optional numpy) |
-| `claude_innit/tools/vault.py` | VaultIndexer, vault_search, vault_related, vault_stats |
-| `claude_innit/tools/federation.py` | Federated search with RRF score fusion |
+| `claude_innit/db/embeddings.py` | Embedding generation, matrix ops, query cache, chunk storage |
+| `claude_innit/tools/vault.py` | VaultIndexer, hybrid search, vault_related, vault_stats |
+| `claude_innit/tools/federation.py` | Two-level RRF fusion across sources |
 | `claude_innit/tools/search.py` | Memory search routing (FTS5/semantic) |
 | `claude_innit/tools/memory.py` | remember/forget with markdown file sync |
 | `claude_innit/utils.py` | Shared utilities (parse_frontmatter) |
+| `claude_innit/utils_chunking.py` | Heading-level text chunking for vault embeddings |
 | `claude_innit/sync/markdown_sync.py` | Markdown → DB sync engine |
 
 ## Documentation
@@ -135,4 +136,4 @@ pip install -e .                        # minimal install (no embeddings)
 
 ---
 
-*Last updated: 2026-03-11*
+*Last updated: 2026-03-12*
