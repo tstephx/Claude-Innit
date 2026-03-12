@@ -1,10 +1,10 @@
 # MCP Tools Reference
 
-Claude-Innit exposes 8 tools. 6 are conversational (used during sessions), 2 are operator-only admin tools.
+Claude-Innit exposes 14 tools: 6 memory tools, 6 vault tools, and 2 operator-only admin tools.
 
 ---
 
-## Conversational Tools
+## Memory Tools
 
 ### `get_context`
 
@@ -34,7 +34,7 @@ Find stored memories by keyword or concept. Use when `get_context` didn't surfac
 - `method: "text"` → force FTS5 phrase search
 - `method: "semantic"` → force semantic search (requires model load)
 - Semantic results filtered at `min_similarity=0.35` — low-relevance results are excluded
-- FTS queries are phrase-wrapped to prevent injection (`"OR AND NOT"` is safe)
+- FTS queries are sanitized via `sanitize_fts_query()` — strips operators, quotes each word
 
 ---
 
@@ -113,6 +113,111 @@ Returns: `{ "success": true, "session_id": "sessions/2026-03-04-120000" }`
 
 ---
 
+## Vault Tools (OBF)
+
+### `vault_index`
+
+Index vault markdown files into the search database. Scans vault root + extra paths.
+
+```json
+{ "force": false }
+```
+
+- Skips unchanged files (content hash comparison) unless `force: true`
+- Detects module from top-level directory name (lowercased)
+- Excludes framework dirs (Daily, Inbox, Archive, Claude-Memory) from module assignment
+- Cleans up DB entries for files deleted from disk
+- Extra paths configured via `EXTRA_INDEX_PATHS` env var (default: `~/Dev/_Lab:~/Dev/_Projects`)
+- Returns: `{ "indexed": N, "updated": N, "unchanged": N, "removed": N, "errors": N, "duration_ms": N }`
+
+---
+
+### `vault_search`
+
+Hybrid FTS + semantic search over vault files.
+
+```json
+{ "query": "API migration", "method": "auto", "scope": "all", "limit": 20 }
+```
+
+- `method: "auto"` → runs BOTH FTS and semantic, merges with mini-RRF (FTS=0.4, semantic=0.6, k=20). Falls back to FTS-only if no embedding store.
+- `method: "text"` → FTS only
+- `method: "semantic"` → semantic only (raises ValueError if no embedding store)
+- `scope: "all"` (default), `"vault"`, or `"configs"` (framework dirs only)
+- Semantic search delegates to `EmbeddingStore.search_chunks()` — deduplicates by file, returns best chunk per file
+- Returns list of dicts with `rrf_score`, `match_type` (fts/semantic/hybrid), `file_path`, `filename`, `module`
+
+---
+
+### `vault_related`
+
+Find notes related to a given note path.
+
+```json
+{ "note_path": "/path/to/note.md", "limit": 10 }
+```
+
+- Tries semantic search first (first 500 chars of note content)
+- Falls back to FTS using filename words if no embeddings
+- Excludes the source note from results
+
+---
+
+### `vault_stats`
+
+Return vault health metrics.
+
+```json
+{}
+```
+
+Returns:
+```json
+{
+  "total_notes": 1234,
+  "by_module": {"notes": 500, "portfolio": 50},
+  "by_status": {"draft": 200, "ready": 100},
+  "inbox_count": 15,
+  "stale_count": 30,
+  "index_age_seconds": 3600.0,
+  "last_indexed": "2026-03-12T15:00:00",
+  "embeddings": {"total": 5000, "self_test": "pass"}
+}
+```
+
+---
+
+### `vault_rechunk`
+
+Force re-chunk all vault files and regenerate embeddings.
+
+```json
+{}
+```
+
+- Deletes all existing chunks and chunk embeddings
+- Re-runs heading-level chunking (`utils_chunking.py`) on every indexed file
+- Generates new embeddings for each chunk
+- Reloads the embedding matrix
+- Returns: `{ "files_processed": N, "chunks_created": N, "embeddings_generated": N, "errors": N }`
+
+---
+
+### `federated_search`
+
+Two-level RRF fusion across multiple sources.
+
+```json
+{ "query": "API migration", "sources": ["vault", "books", "sessions"], "limit": 30 }
+```
+
+- Sources: `vault` (hybrid FTS+semantic), `books` (book-library DB), `sessions` (memory sessions), `portfolio` (vault module filter)
+- Inner: vault hybrid search (k=20)
+- Outer: RRF fusion across all sources (k=60, equal weights)
+- Returns: `{ "vault": [...], "books": [...], "sessions": [...], "merged": [...] }`
+
+---
+
 ## Operator Tools
 
 These are for debugging/maintenance only. Not needed in normal sessions.
@@ -142,7 +247,7 @@ Check database health and repair issues. Call when search or sync is behaving un
 
 Checks:
 1. SQLite structural integrity (`PRAGMA integrity_check`)
-2. FTS index sync (count comparison, rebuilds if off)
-3. Orphaned embeddings (no matching memory row)
+2. FTS index sync for memories and vault (count comparison, rebuilds if off)
+3. Orphaned embeddings (memory embeddings, vault embeddings, chunk embeddings)
 
 Returns: `{ "status": "healthy|repaired|unhealthy", "memories": N, "issues": [...], "repairs": [...] }`

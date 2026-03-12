@@ -2,7 +2,9 @@
 
 ## Database Schema (`data/innit.db`)
 
-### `memories` table
+### Memory Tables
+
+#### `memories`
 
 ```sql
 CREATE TABLE memories (
@@ -21,14 +23,14 @@ CREATE TABLE memories (
 - `project`: `{"name": "project-name"}` — used for filtering in `get_context` and `list_memories`
 - `session`: `{"project": "project-name", "topics": [...], "date": "YYYY-MM-DD"}`
 
-### `memories_fts` virtual table (FTS5)
+#### `memories_fts` (FTS5)
 
 Content-shadowed FTS5 index over `memories`. Kept in sync via triggers:
 - `memories_ai` — INSERT on memories → INSERT into FTS
 - `memories_ad` — DELETE on memories → DELETE from FTS
 - `memories_au` — UPDATE on memories → DELETE+INSERT in FTS
 
-### `embeddings` table
+#### `embeddings`
 
 ```sql
 CREATE TABLE embeddings (
@@ -38,6 +40,93 @@ CREATE TABLE embeddings (
     FOREIGN KEY (memory_id) REFERENCES memories(id)
 );
 ```
+
+---
+
+### Vault Tables
+
+#### `vault_files`
+
+```sql
+CREATE TABLE vault_files (
+    file_id     INTEGER PRIMARY KEY,
+    file_path   TEXT UNIQUE NOT NULL,  -- absolute path on disk
+    filename    TEXT NOT NULL,         -- just the filename (e.g. "note.md")
+    content     TEXT NOT NULL,         -- body text (frontmatter stripped)
+    content_hash TEXT NOT NULL,        -- SHA-256 of raw file content (staleness detection)
+    frontmatter JSON,                  -- parsed YAML frontmatter as JSON
+    module      TEXT,                  -- lowercased top-level dir name (NULL for framework dirs)
+    file_size   INTEGER,
+    modified_at TIMESTAMP,            -- file mtime from disk
+    indexed_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+```
+
+#### `vault_files_fts` (FTS5)
+
+```sql
+CREATE VIRTUAL TABLE vault_files_fts USING fts5(
+    file_path, filename, content,
+    content='vault_files', content_rowid='file_id',
+    tokenize='porter unicode61'
+);
+```
+
+Kept in sync via triggers: `vault_files_ai`, `vault_files_ad`, `vault_files_au`.
+
+#### `vault_chunks`
+
+```sql
+CREATE TABLE vault_chunks (
+    chunk_id     INTEGER PRIMARY KEY,
+    file_id      INTEGER NOT NULL,     -- FK to vault_files
+    chunk_index  INTEGER NOT NULL,     -- 0-based position within file
+    heading      TEXT,                 -- section heading (NULL for preamble/fallback)
+    content      TEXT NOT NULL,        -- chunk text
+    char_offset  INTEGER DEFAULT 0,   -- position in original file
+    content_hash TEXT NOT NULL DEFAULT '',  -- parent file's hash (for staleness)
+    FOREIGN KEY (file_id) REFERENCES vault_files(file_id),
+    UNIQUE(file_id, chunk_index)
+);
+```
+
+#### `vault_chunk_embeddings`
+
+```sql
+CREATE TABLE vault_chunk_embeddings (
+    chunk_id   INTEGER PRIMARY KEY,
+    file_id    INTEGER NOT NULL,
+    embedding  BLOB,                   -- float32 array, 384 dims
+    model      TEXT,                   -- "all-MiniLM-L6-v2"
+    FOREIGN KEY (chunk_id) REFERENCES vault_chunks(chunk_id),
+    FOREIGN KEY (file_id) REFERENCES vault_files(file_id)
+);
+CREATE INDEX idx_vce_file_id ON vault_chunk_embeddings(file_id);
+```
+
+#### `vault_embeddings` (DEPRECATED)
+
+```sql
+-- Superseded by vault_chunk_embeddings (chunk-level).
+-- Retained for backward compat. All read paths guard with try/except.
+CREATE TABLE vault_embeddings (
+    file_id   INTEGER PRIMARY KEY,
+    embedding BLOB,
+    model     TEXT,
+    FOREIGN KEY (file_id) REFERENCES vault_files(file_id)
+);
+```
+
+#### `chunk_config`
+
+```sql
+CREATE TABLE chunk_config (
+    key   TEXT PRIMARY KEY,           -- "max_chunk_chars", "min_chunk_chars"
+    value TEXT NOT NULL               -- stored as string
+);
+```
+
+Tracks chunking parameters. If `max_chunk_chars` or `min_chunk_chars` change between runs, `batch_store_chunk_embeddings()` auto-triggers a force rechunk.
 
 ---
 
@@ -100,6 +189,25 @@ data/memories/
 
 ---
 
+## Module Detection
+
+Files in vault are assigned a `module` based on their top-level directory:
+
+| Path | Module |
+|------|--------|
+| `<vault>/Notes/foo.md` | `notes` |
+| `<vault>/Portfolio/bar.md` | `portfolio` |
+| `<vault>/Daily/2026-01-01.md` | `NULL` (framework dir) |
+| `<vault>/Inbox/capture.md` | `NULL` (framework dir) |
+| `<vault>/Archive/old.md` | `NULL` (framework dir) |
+| `<vault>/Claude-Memory/ctx.md` | `NULL` (framework dir) |
+| `<vault>/root-file.md` | `NULL` (root level) |
+
+Framework dirs: `daily`, `inbox`, `archive`, `claude-memory` (case-insensitive).
+Dot-prefixed dirs (`.brain/`, `.claude/`) are excluded by `VaultIndexer.exclude_patterns`, not by module detection.
+
+---
+
 ## SQLite Configuration
 
 Enabled on every connection open:
@@ -108,4 +216,5 @@ Enabled on every connection open:
 sqlite3.connect(db_path, timeout=30, check_same_thread=False)
 PRAGMA journal_mode=WAL      # concurrent readers + single writer
 PRAGMA synchronous=NORMAL    # safe with WAL, avoids fsync on every commit
+PRAGMA foreign_keys=ON       # enforce FK constraints
 ```

@@ -63,13 +63,15 @@ MCP server giving Claude persistent memory across sessions. Three categories (pe
 - **Extra index paths**: `EXTRA_INDEX_PATHS` env var (colon-separated), defaults to `~/Dev/_Lab:~/Dev/_Projects` — indexed alongside vault on `vault_index`
 - **Fail-loud semantic**: `vault_search(method="semantic")` raises `ValueError` when no embedding store, instead of returning empty results
 - **Orphan cleanup**: `vault_index` auto-cleans orphaned vault/chunk embeddings after each run
-- **Module detection**: `_detect_module()` in `tools/vault.py` — lowercased top-level folder name, excludes framework dirs (`.`, Daily, Inbox, Archive, Claude-Memory)
+- **Encapsulated search**: `EmbeddingStore.search_chunks()` encapsulates all matrix access — `vault_semantic_search()` is a thin wrapper with scope filter only
+- **FTS sanitization**: `sanitize_fts_query()` in `utils.py` — strips operators, quotes each word. Used by all FTS call sites (memory, vault, federation)
+- **Module detection**: `_detect_module()` in `tools/vault.py` — lowercased top-level folder name, excludes framework dirs (Daily, Inbox, Archive, Claude-Memory)
 - **Metadata key**: memories use `metadata["project"]` — queries use `json_extract(metadata, '$.project')`
-- **Schema**: `vault_chunks` + `vault_chunk_embeddings` tables with FK constraints. Legacy `vault_embeddings` table deprecated (still present for backward compat)
+- **Schema**: 9 tables — `vault_chunks` + `vault_chunk_embeddings` with FK constraints. Legacy `vault_embeddings` deprecated (retained for backward compat)
 
 ## Commands
 ```bash
-.venv/bin/python -m pytest tests/ -v    # all tests (101 total)
+.venv/bin/python -m pytest tests/ -v    # all tests (202 total)
 .venv/bin/python -m claude_innit.server # run MCP server
 pip install -e ".[embeddings,dev]"      # dev install with all deps
 pip install -e .                        # minimal install (no embeddings)
@@ -81,10 +83,11 @@ pip install -e .                        # minimal install (no embeddings)
 
 | Problem | Fix |
 |---------|-----|
-| DB locked / SQLITE_BUSY | Stop concurrent runs; WAL mode makes this rare now |
-| Semantic search slow first time | Should be rare now — `warm()` pre-loads at startup. If still slow, check model cache |
+| DB locked / SQLITE_BUSY | Stop concurrent runs; check for zombie pytest (`ps aux \| grep pytest`). WAL mode makes this rare. |
+| Semantic search slow first time | Should be rare — `warm()` pre-loads at startup. If still slow, check model cache |
 | Memory comes back after forget() | File wasn't deleted — use `forget()` via MCP (passes memories_dir) |
 | Memories out of sync | `admin_sync` then `admin_check_integrity` |
+| search_chunks returns empty | Verify `load_matrix()` ran and chunk embeddings exist in DB |
 
 ## Change Protocol
 1. `pytest tests/ -v` (before)
@@ -112,15 +115,15 @@ pip install -e .                        # minimal install (no embeddings)
 ## Key Files
 | File | Purpose |
 |------|---------|
-| `claude_innit/server.py` | MCP server, tool registration, async dispatch |
-| `claude_innit/db/database.py` | SQLite + FTS5 (memories + vault tables, triggers, integrity check) |
-| `claude_innit/db/embeddings.py` | Embedding generation, matrix ops, query cache, chunk storage |
-| `claude_innit/tools/vault.py` | VaultIndexer, hybrid search, vault_related, vault_stats |
-| `claude_innit/tools/federation.py` | Two-level RRF fusion across sources |
+| `claude_innit/server.py` | MCP server, 14 tools, call_tool dispatch with error boundary |
+| `claude_innit/db/database.py` | SQLite schema (9 tables), FTS5, WAL, chunk methods, integrity check |
+| `claude_innit/db/embeddings.py` | EmbeddingStore: generate, search_chunks, matrix ops, batch embedding |
+| `claude_innit/tools/vault.py` | VaultIndexer, vault_search (hybrid), vault_related, vault_stats |
+| `claude_innit/tools/federation.py` | Two-level RRF fusion across vault, books, sessions, portfolio |
 | `claude_innit/tools/search.py` | Memory search routing (FTS5/semantic) |
 | `claude_innit/tools/memory.py` | remember/forget with markdown file sync |
-| `claude_innit/utils.py` | Shared utilities (parse_frontmatter) |
-| `claude_innit/utils_chunking.py` | Heading-level text chunking for vault embeddings |
+| `claude_innit/utils.py` | parse_frontmatter, sanitize_fts_query |
+| `claude_innit/utils_chunking.py` | Heading-level text chunking (chunk_by_headings) |
 | `claude_innit/sync/markdown_sync.py` | Markdown → DB sync engine |
 
 ## Documentation
