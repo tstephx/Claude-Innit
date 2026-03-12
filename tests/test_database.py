@@ -390,3 +390,131 @@ class TestChunkConfig:
         result = db.get_chunk_config()
         assert isinstance(result["int_val"], str)
         assert isinstance(result["float_val"], str)
+
+
+# ---------------------------------------------------------------------------
+# vault_stale_files tests
+# ---------------------------------------------------------------------------
+
+
+class TestVaultStaleFiles:
+    def test_returns_stale_files(self, tmp_path):
+        """Files with indexed_at older than threshold appear in results."""
+        db = MemoryDatabase(tmp_path / "test.db")
+        db.upsert_vault_file("/vault/old.md", "old.md", "old content", "h1")
+        # Backdate indexed_at by 60 days
+        db.execute(
+            "UPDATE vault_files SET indexed_at = datetime('now', '-60 days') "
+            "WHERE file_path = '/vault/old.md'"
+        )
+        db.commit()
+
+        results = db.vault_stale_files(days=30)
+        assert len(results) >= 1
+        paths = [r["file_path"] for r in results]
+        assert "/vault/old.md" in paths
+
+    def test_excludes_fresh_files(self, tmp_path):
+        """Recently indexed files do not appear in stale results."""
+        db = MemoryDatabase(tmp_path / "test.db")
+        db.upsert_vault_file("/vault/fresh.md", "fresh.md", "new content", "h2")
+
+        results = db.vault_stale_files(days=30)
+        paths = [r["file_path"] for r in results]
+        assert "/vault/fresh.md" not in paths
+
+    def test_returns_expected_fields(self, tmp_path):
+        """Each result has file_path, filename, module, indexed_at."""
+        db = MemoryDatabase(tmp_path / "test.db")
+        db.upsert_vault_file("/vault/old.md", "old.md", "content", "h1", module="notes")
+        db.execute(
+            "UPDATE vault_files SET indexed_at = datetime('now', '-60 days') "
+            "WHERE file_path = '/vault/old.md'"
+        )
+        db.commit()
+
+        results = db.vault_stale_files(days=30)
+        assert len(results) >= 1
+        row = results[0]
+        assert isinstance(row, dict)
+        for key in ("file_path", "filename", "module", "indexed_at"):
+            assert key in row
+
+    def test_empty_db_returns_empty(self, tmp_path):
+        """Empty database returns empty list."""
+        db = MemoryDatabase(tmp_path / "test.db")
+        assert db.vault_stale_files(days=1) == []
+
+    def test_days_parameter_respected(self, tmp_path):
+        """A file 10 days old is stale for days=5 but not for days=15."""
+        db = MemoryDatabase(tmp_path / "test.db")
+        db.upsert_vault_file("/vault/mid.md", "mid.md", "content", "h1")
+        db.execute(
+            "UPDATE vault_files SET indexed_at = datetime('now', '-10 days') "
+            "WHERE file_path = '/vault/mid.md'"
+        )
+        db.commit()
+
+        assert len(db.vault_stale_files(days=5)) >= 1
+        assert len(db.vault_stale_files(days=15)) == 0
+
+
+# ---------------------------------------------------------------------------
+# integrity_check(auto_repair=False) tests
+# ---------------------------------------------------------------------------
+
+
+class TestIntegrityCheckReadOnly:
+    def test_reports_issues_without_repairing(self, tmp_path):
+        """auto_repair=False reports FTS desync but does not rebuild."""
+        db = MemoryDatabase(tmp_path / "test.db")
+        db.insert_memory("test/1", "personal", "some content", metadata={})
+
+        # Manually corrupt FTS by deleting from docsize (simulates desync)
+        db.execute("DELETE FROM memories_fts_docsize")
+        db.commit()
+
+        result = db.integrity_check(auto_repair=False)
+        assert result["status"] == "unhealthy"
+        assert len(result["issues"]) > 0
+        assert len(result["repairs"]) == 0
+
+    def test_auto_repair_true_fixes_issues(self, tmp_path):
+        """auto_repair=True repairs the same desync."""
+        db = MemoryDatabase(tmp_path / "test.db")
+        db.insert_memory("test/1", "personal", "some content", metadata={})
+
+        db.execute("DELETE FROM memories_fts_docsize")
+        db.commit()
+
+        result = db.integrity_check(auto_repair=True)
+        assert result["status"] == "repaired"
+        assert len(result["repairs"]) > 0
+
+    def test_healthy_db_returns_healthy(self, tmp_path):
+        """A clean database returns status='healthy'."""
+        db = MemoryDatabase(tmp_path / "test.db")
+        result = db.integrity_check(auto_repair=False)
+        assert result["status"] == "healthy"
+        assert result["issues"] == []
+        assert result["repairs"] == []
+
+    def test_return_type_and_fields(self, tmp_path):
+        """Return dict has all expected keys with correct types."""
+        db = MemoryDatabase(tmp_path / "test.db")
+        result = db.integrity_check(auto_repair=False)
+        assert isinstance(result, dict)
+        for key in (
+            "status",
+            "memories",
+            "memories_fts",
+            "vault_files",
+            "vault_fts",
+            "embeddings",
+            "issues",
+            "repairs",
+        ):
+            assert key in result
+        assert isinstance(result["memories"], int)
+        assert isinstance(result["issues"], list)
+        assert isinstance(result["repairs"], list)

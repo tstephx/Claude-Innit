@@ -308,3 +308,121 @@ class TestSearchChunks:
 
         assert len(results) >= 1
         assert "matched_heading" in results[0]
+
+
+# ---------------------------------------------------------------------------
+# batch_store_chunk_embeddings tests
+# ---------------------------------------------------------------------------
+
+
+class TestBatchStoreChunkEmbeddings:
+    def test_processes_vault_files(self, tmp_path):
+        """Chunks vault files and generates embeddings."""
+        db = MemoryDatabase(tmp_path / "test.db")
+        store = EmbeddingStore(db)
+
+        db.upsert_vault_file(
+            "/vault/doc.md",
+            "doc.md",
+            "# Introduction\n\nSome intro text.\n\n## Details\n\nMore details here.",
+            "hash1",
+        )
+
+        result = store.batch_store_chunk_embeddings()
+
+        assert isinstance(result, dict)
+        assert result["files_processed"] >= 1
+        assert result["chunks_created"] >= 1
+        assert result["embeddings_generated"] >= 1
+        assert result["errors"] == 0
+
+        # Verify chunks actually in DB
+        file_id = db.get_vault_file("/vault/doc.md")["file_id"]
+        chunks = db.get_chunks_for_file(file_id)
+        assert len(chunks) >= 1
+
+        # Verify embeddings in DB
+        emb_count = db.execute(
+            "SELECT COUNT(*) FROM vault_chunk_embeddings WHERE file_id = ?",
+            (file_id,),
+        ).fetchone()[0]
+        assert emb_count == len(chunks)
+
+    def test_force_mode_rebuilds_all(self, tmp_path):
+        """force=True deletes existing chunks and re-creates."""
+        db = MemoryDatabase(tmp_path / "test.db")
+        store = EmbeddingStore(db)
+
+        db.upsert_vault_file("/vault/doc.md", "doc.md", "# Title\n\nContent.", "hash1")
+
+        # First run
+        r1 = store.batch_store_chunk_embeddings()
+        assert r1["files_processed"] >= 1
+
+        # Second run without force — should skip (same content_hash)
+        r2 = store.batch_store_chunk_embeddings()
+        assert r2["files_processed"] == 0
+
+        # Force run — should reprocess
+        r3 = store.batch_store_chunk_embeddings(force=True)
+        assert r3["files_processed"] >= 1
+
+    def test_skips_empty_content_files(self, tmp_path):
+        """Files with empty content are skipped."""
+        db = MemoryDatabase(tmp_path / "test.db")
+        store = EmbeddingStore(db)
+
+        db.upsert_vault_file("/vault/empty.md", "empty.md", "", "hash_empty")
+
+        result = store.batch_store_chunk_embeddings()
+        assert result["files_processed"] == 0
+
+    def test_return_type_and_fields(self, tmp_path):
+        """Return dict has all expected keys with correct types."""
+        db = MemoryDatabase(tmp_path / "test.db")
+        store = EmbeddingStore(db)
+
+        result = store.batch_store_chunk_embeddings()
+        assert isinstance(result, dict)
+        for key in (
+            "files_processed",
+            "chunks_created",
+            "embeddings_generated",
+            "rechunked",
+            "errors",
+        ):
+            assert key in result
+            assert isinstance(result[key], int)
+
+    def test_rechunk_count_tracks_updated_files(self, tmp_path):
+        """rechunked count increments for files that already had chunks."""
+        db = MemoryDatabase(tmp_path / "test.db")
+        store = EmbeddingStore(db)
+
+        db.upsert_vault_file("/vault/doc.md", "doc.md", "# Title\n\nOriginal.", "hash1")
+        store.batch_store_chunk_embeddings()
+
+        # Update file content (new hash)
+        db.upsert_vault_file(
+            "/vault/doc.md", "doc.md", "# Title\n\nUpdated content.", "hash2"
+        )
+        result = store.batch_store_chunk_embeddings()
+        assert result["rechunked"] >= 1
+
+    def test_no_db_raises(self):
+        """batch_store_chunk_embeddings raises ValueError without db."""
+        store = EmbeddingStore(db=None)
+        with __import__("pytest").raises(ValueError):
+            store.batch_store_chunk_embeddings()
+
+    def test_stores_chunk_config(self, tmp_path):
+        """After processing, chunk config is stored in DB."""
+        db = MemoryDatabase(tmp_path / "test.db")
+        store = EmbeddingStore(db)
+
+        db.upsert_vault_file("/vault/doc.md", "doc.md", "# Title\n\nContent.", "hash1")
+        store.batch_store_chunk_embeddings()
+
+        config = db.get_chunk_config()
+        assert "max_chunk_chars" in config
+        assert "min_chunk_chars" in config

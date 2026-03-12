@@ -220,3 +220,55 @@ class TestFederatedSearchSmoke:
         result = await _call(server, "federated_search", args)
         assert "error" not in result, f"federated_search({desc}) error: {result}"
         assert "merged" in result
+
+
+# ---------------------------------------------------------------------------
+# Error paths and admin dispatch (coverage gaps)
+# ---------------------------------------------------------------------------
+
+
+class TestVaultIndexMissingVaultRoot:
+    """vault_index without vault_root returns error, not crash."""
+
+    @pytest.mark.asyncio
+    async def test_returns_error_without_vault_root(self, tmp_path):
+        server = create_server(
+            db_path=tmp_path / "test.db",
+            memories_dir=tmp_path / "memories",
+            vault_root=None,
+        )
+        result = await _call(server, "vault_index", {})
+        assert "error" in result
+
+
+class TestAdminSyncDispatch:
+    """admin_sync — dispatch through call_tool."""
+
+    @pytest.mark.asyncio
+    async def test_admin_sync_responds(self, tmp_path):
+        memories = tmp_path / "memories"
+        memories.mkdir()
+        server = create_server(
+            db_path=tmp_path / "test.db",
+            memories_dir=memories,
+        )
+        result = await _call(server, "admin_sync", {})
+        assert isinstance(result, dict)
+        assert "error" not in result
+
+
+class TestAdminCheckIntegrityDispatch:
+    """admin_check_integrity — dispatch with auto_repair=False."""
+
+    @pytest.mark.asyncio
+    async def test_check_integrity_read_only(self, server):
+        result = await _call(server, "admin_check_integrity", {"auto_repair": False})
+        assert isinstance(result, dict)
+        assert result["status"] == "healthy"
+        assert result["repairs"] == []
+
+    @pytest.mark.asyncio
+    async def test_check_integrity_default_auto_repair(self, server):
+        result = await _call(server, "admin_check_integrity", {})
+        assert isinstance(result, dict)
+        assert "status" in result
