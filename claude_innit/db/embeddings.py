@@ -165,6 +165,74 @@ class EmbeddingStore:
         vec /= np.linalg.norm(vec) + 1e-10
         return vec
 
+    def search_chunks(
+        self,
+        query: str,
+        limit: int = 10,
+        min_similarity: float = 0.35,
+        file_filter=None,
+    ) -> list[dict]:
+        """Search vault chunks by semantic similarity using pre-computed matrix.
+
+        Returns one result per file (best-scoring chunk), sorted by
+        similarity descending. Ensures matrix is loaded, applies recency
+        weights, and deduplicates by file.
+
+        Args:
+            file_filter: Optional callable(file_meta_dict) -> bool.
+                         Return False to exclude a file from results.
+        """
+        if self.db is None:
+            return []
+
+        if not self._matrix_loaded:
+            self.load_matrix()
+
+        if self._matrix is None or not self._chunk_meta:
+            return []
+
+        query_vec = self.query_embedding(query)
+        similarities = np.dot(self._matrix, query_vec)
+
+        if self._recency_weights is not None:
+            similarities = similarities * self._recency_weights
+
+        results_by_file = {}
+        for i, meta in enumerate(self._chunk_meta):
+            sim = float(similarities[i])
+            if sim < min_similarity:
+                continue
+
+            file_id = meta["file_id"]
+            file_info = self._file_meta.get(file_id, {})
+
+            if file_filter and not file_filter(file_info):
+                continue
+
+            if (
+                file_id not in results_by_file
+                or sim > results_by_file[file_id]["similarity"]
+            ):
+                result = {
+                    "file_id": file_id,
+                    "file_path": file_info.get("file_path", ""),
+                    "filename": file_info.get("filename", ""),
+                    "module": file_info.get("module"),
+                    "similarity": sim,
+                    "snippet": meta.get("snippet", ""),
+                }
+                if "heading" in meta:
+                    result["matched_heading"] = meta.get("heading")
+                    result["chunk_index"] = meta.get("chunk_index")
+                results_by_file[file_id] = result
+
+        results = sorted(
+            results_by_file.values(),
+            key=lambda x: x["similarity"],
+            reverse=True,
+        )
+        return results[:limit]
+
     def invalidate_matrix(self) -> None:
         """Mark matrix as stale. Next search triggers reload."""
         self._matrix = None

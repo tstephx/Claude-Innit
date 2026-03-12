@@ -13,6 +13,7 @@ from claude_innit.tools.vault import (
     _content_hash,
     _detect_module,
     _parse_frontmatter,
+    _hybrid_merge,
 )
 
 
@@ -405,3 +406,125 @@ class TestDatabaseVaultMethods:
         result = db.vault_files_by_status()
         assert result["draft"] == 2
         assert result["ready"] == 1
+
+
+# ---------------------------------------------------------------------------
+# _hybrid_merge tests
+# ---------------------------------------------------------------------------
+
+
+def _fts_item(file_path: str, score: float = 1.0, **extra) -> dict:
+    """Build a minimal FTS result dict as _fts_search would produce."""
+    return {
+        "file_path": file_path,
+        "filename": file_path.split("/")[-1],
+        "score": score,
+        **extra,
+    }
+
+
+def _sem_item(file_path: str, similarity: float = 0.9, **extra) -> dict:
+    """Build a minimal semantic result dict as vault_semantic_search would produce."""
+    return {
+        "file_path": file_path,
+        "filename": file_path.split("/")[-1],
+        "similarity": similarity,
+        **extra,
+    }
+
+
+class TestHybridMerge:
+    def test_fts_only_items_get_fts_match_type(self):
+        """Items present only in FTS results receive match_type='fts'."""
+        fts = [_fts_item("/a.md")]
+        sem = []
+        results = _hybrid_merge(fts, sem, limit=10)
+        assert len(results) == 1
+        assert results[0]["match_type"] == "fts"
+
+    def test_semantic_only_items_get_semantic_match_type(self):
+        """Items present only in semantic results receive match_type='semantic'."""
+        fts = []
+        sem = [_sem_item("/b.md")]
+        results = _hybrid_merge(fts, sem, limit=10)
+        assert len(results) == 1
+        assert results[0]["match_type"] == "semantic"
+
+    def test_items_in_both_lists_get_hybrid_match_type(self):
+        """Items appearing in both lists receive match_type='hybrid'."""
+        fts = [_fts_item("/c.md")]
+        sem = [_sem_item("/c.md")]
+        results = _hybrid_merge(fts, sem, limit=10)
+        assert len(results) == 1
+        assert results[0]["match_type"] == "hybrid"
+
+    def test_hybrid_rrf_score_is_sum_of_fts_and_semantic(self):
+        """The rrf_score for a hybrid item equals the sum of both individual RRF contributions."""
+        fts = [_fts_item("/shared.md")]
+        sem = [_sem_item("/shared.md")]
+        results = _hybrid_merge(fts, sem, limit=10)
+
+        k = 20
+        expected = 0.4 / (k + 0) + 0.6 / (k + 0)  # rank 0 for each
+        assert abs(results[0]["rrf_score"] - expected) < 1e-9
+
+    def test_results_sorted_by_rrf_score_descending(self):
+        """Output list is sorted by rrf_score highest-first."""
+        fts = [_fts_item("/a.md"), _fts_item("/b.md"), _fts_item("/c.md")]
+        sem = [_sem_item("/c.md")]  # /c.md gets boosted to hybrid
+        results = _hybrid_merge(fts, sem, limit=10)
+
+        scores = [r["rrf_score"] for r in results]
+        assert scores == sorted(scores, reverse=True)
+
+    def test_limit_parameter_truncates_output(self):
+        """Result list is no longer than the requested limit."""
+        fts = [_fts_item(f"/{i}.md") for i in range(10)]
+        sem = [_sem_item(f"/{i}.md") for i in range(10)]
+        results = _hybrid_merge(fts, sem, limit=3)
+        assert len(results) == 3
+
+    def test_limit_zero_returns_empty_list(self):
+        """limit=0 returns an empty list."""
+        fts = [_fts_item("/x.md")]
+        results = _hybrid_merge(fts, [], limit=0)
+        assert results == []
+
+    def test_raw_score_stripped_from_fts_items(self):
+        """The 'score' field from FTS results is not present in merged output."""
+        fts = [_fts_item("/a.md", score=0.99)]
+        results = _hybrid_merge(fts, [], limit=10)
+        assert "score" not in results[0]
+
+    def test_raw_similarity_stripped_from_semantic_items(self):
+        """The 'similarity' field from semantic results is not present in merged output."""
+        sem = [_sem_item("/b.md", similarity=0.87)]
+        results = _hybrid_merge([], sem, limit=10)
+        assert "similarity" not in results[0]
+
+    def test_raw_score_and_similarity_stripped_from_hybrid_items(self):
+        """Both 'score' and 'similarity' are absent from hybrid items."""
+        fts = [_fts_item("/c.md", score=1.0)]
+        sem = [_sem_item("/c.md", similarity=0.75)]
+        results = _hybrid_merge(fts, sem, limit=10)
+        assert "score" not in results[0]
+        assert "similarity" not in results[0]
+
+    def test_rrf_score_present_in_all_output_items(self):
+        """Every item in the output has an rrf_score field."""
+        fts = [_fts_item("/a.md"), _fts_item("/b.md")]
+        sem = [_sem_item("/b.md"), _sem_item("/c.md")]
+        results = _hybrid_merge(fts, sem, limit=10)
+        assert all("rrf_score" in r for r in results)
+
+    def test_empty_inputs_return_empty_list(self):
+        """Both inputs empty produces empty output."""
+        assert _hybrid_merge([], [], limit=10) == []
+
+    def test_matched_heading_propagated_from_semantic_into_hybrid(self):
+        """When a semantic item with matched_heading merges with an FTS item,
+        matched_heading is carried into the hybrid result."""
+        fts = [_fts_item("/d.md")]
+        sem = [_sem_item("/d.md", matched_heading="## Overview")]
+        results = _hybrid_merge(fts, sem, limit=10)
+        assert results[0]["matched_heading"] == "## Overview"

@@ -150,3 +150,161 @@ def test_semantic_search_returns_high_similarity(tmp_path):
 
     assert len(results) == 1
     assert results[0]["similarity"] >= 0.5
+
+
+# ---------------------------------------------------------------------------
+# search_chunks tests (vault semantic search via EmbeddingStore)
+# ---------------------------------------------------------------------------
+
+
+def _setup_store_with_chunks(tmp_path, n_chunks=3):
+    """Create a store with vault file + chunk embeddings loaded into matrix."""
+    from unittest.mock import patch
+
+    db = MemoryDatabase(tmp_path / "test.db")
+    store = EmbeddingStore(db)
+
+    # Insert a vault file
+    db.upsert_vault_file("/vault/doc.md", "doc.md", "content", "hash1", module="notes")
+    file_id = db.get_vault_file("/vault/doc.md")["file_id"]
+
+    # Insert chunks with embeddings directly
+    vec = np.ones(384, dtype=np.float32)
+    vec /= np.linalg.norm(vec)
+    blob = vec.tobytes()
+
+    for i in range(n_chunks):
+        db.execute(
+            """INSERT INTO vault_chunks
+               (file_id, chunk_index, heading, content, char_offset, content_hash)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (file_id, i, f"Section {i}", f"Chunk {i} content", i * 100, "hash1"),
+        )
+    db.commit()
+
+    chunk_rows = db.get_chunks_for_file(file_id)
+    for row in chunk_rows:
+        db.execute(
+            """INSERT INTO vault_chunk_embeddings
+               (chunk_id, file_id, embedding, model) VALUES (?, ?, ?, ?)""",
+            (row["chunk_id"], file_id, blob, "test-model"),
+        )
+    db.commit()
+
+    # Load matrix
+    store.load_matrix()
+
+    return db, store, file_id
+
+
+class TestSearchChunks:
+    def test_returns_empty_when_no_db(self):
+        """search_chunks returns [] when db is None."""
+        store = EmbeddingStore(db=None)
+        assert store.search_chunks("test") == []
+
+    def test_returns_empty_when_matrix_empty(self, tmp_path):
+        """search_chunks returns [] when matrix has no embeddings."""
+        db = MemoryDatabase(tmp_path / "test.db")
+        store = EmbeddingStore(db)
+        store.load_matrix()  # No data -> empty matrix
+        # Patch query_embedding to avoid needing the model
+        store._matrix_loaded = True
+        assert store.search_chunks("test") == []
+
+    def test_returns_results_with_required_fields(self, tmp_path):
+        """Results contain file_path, filename, module, similarity, snippet."""
+        from unittest.mock import patch
+
+        db, store, _ = _setup_store_with_chunks(tmp_path)
+
+        with patch.object(store, "query_embedding", return_value=store._matrix[0]):
+            results = store.search_chunks("test", limit=5)
+
+        assert len(results) >= 1
+        result = results[0]
+        assert "file_path" in result
+        assert "filename" in result
+        assert "module" in result
+        assert "similarity" in result
+        assert isinstance(result["similarity"], float)
+
+    def test_deduplicates_by_file(self, tmp_path):
+        """Multiple chunks from the same file produce one result."""
+        from unittest.mock import patch
+
+        db, store, _ = _setup_store_with_chunks(tmp_path, n_chunks=5)
+
+        with patch.object(store, "query_embedding", return_value=store._matrix[0]):
+            results = store.search_chunks("test", limit=10)
+
+        # All 5 chunks belong to the same file -> 1 result
+        assert len(results) == 1
+
+    def test_respects_min_similarity(self, tmp_path):
+        """Results below min_similarity are excluded."""
+        from unittest.mock import patch
+
+        db, store, _ = _setup_store_with_chunks(tmp_path)
+
+        # Use a near-orthogonal query vector
+        orthogonal = np.zeros(384, dtype=np.float32)
+        orthogonal[0] = 1.0
+
+        with patch.object(store, "query_embedding", return_value=orthogonal):
+            results = store.search_chunks("test", min_similarity=0.99)
+
+        assert len(results) == 0
+
+    def test_respects_limit(self, tmp_path):
+        """Output respects the limit parameter."""
+        from unittest.mock import patch
+
+        db, store, _ = _setup_store_with_chunks(tmp_path)
+
+        with patch.object(store, "query_embedding", return_value=store._matrix[0]):
+            results = store.search_chunks("test", limit=0)
+
+        assert len(results) == 0
+
+    def test_file_filter_excludes_files(self, tmp_path):
+        """file_filter=lambda returning False excludes matching files."""
+        from unittest.mock import patch
+
+        db, store, _ = _setup_store_with_chunks(tmp_path)
+
+        with patch.object(store, "query_embedding", return_value=store._matrix[0]):
+            results = store.search_chunks(
+                "test",
+                limit=10,
+                file_filter=lambda f: f.get("module") == "nonexistent",
+            )
+
+        assert len(results) == 0
+
+    def test_file_filter_includes_matching_files(self, tmp_path):
+        """file_filter=lambda returning True includes matching files."""
+        from unittest.mock import patch
+
+        db, store, _ = _setup_store_with_chunks(tmp_path)
+
+        with patch.object(store, "query_embedding", return_value=store._matrix[0]):
+            results = store.search_chunks(
+                "test",
+                limit=10,
+                file_filter=lambda f: f.get("module") == "notes",
+            )
+
+        assert len(results) == 1
+
+    def test_includes_matched_heading(self, tmp_path):
+        """Results include matched_heading from chunk metadata."""
+        from unittest.mock import patch
+
+        db, store, _ = _setup_store_with_chunks(tmp_path)
+
+        with patch.object(store, "query_embedding", return_value=store._matrix[0]):
+            results = store.search_chunks("test", limit=5)
+
+        assert len(results) >= 1
+        assert "matched_heading" in results[0]

@@ -282,72 +282,24 @@ def vault_semantic_search(
 ) -> list[dict]:
     """Search vault files by semantic similarity using chunk embeddings.
 
-    Uses pre-computed embedding matrix for fast vectorized search.
-    Always deduplicates by file — returns one result per file with
-    the best-scoring chunk's metadata (matched_heading, chunk_index).
-    Recency boost is pre-applied via the matrix's recency weights.
+    Delegates to EmbeddingStore.search_chunks() for matrix search,
+    deduplication, and recency weighting. This function only applies
+    the scope_module filter.
 
     Args:
         scope_module: If "configs", only return files where module is None
                       (framework config dirs). None means no filter.
     """
-    if embedding_store.db is None:
-        return []
+    file_filter = None
+    if scope_module == "configs":
+        file_filter = lambda f: f.get("module") is None
 
-    import numpy as np
-
-    # Ensure matrix is loaded
-    if not embedding_store._matrix_loaded:
-        embedding_store.load_matrix()
-
-    if embedding_store._matrix is None or not embedding_store._chunk_meta:
-        return []
-
-    # Vectorized cosine similarity (both pre-normalized -> dot product)
-    query_vec = embedding_store.query_embedding(query)
-    similarities = np.dot(embedding_store._matrix, query_vec)
-
-    # Apply pre-computed recency weights (single vectorized multiply)
-    if embedding_store._recency_weights is not None:
-        similarities = similarities * embedding_store._recency_weights
-
-    # Filter and deduplicate by file (keep best chunk per file)
-    results_by_file = {}
-    for i, meta in enumerate(embedding_store._chunk_meta):
-        sim = float(similarities[i])
-        if sim < min_similarity:
-            continue
-
-        file_id = meta["file_id"]
-        file_info = embedding_store._file_meta.get(file_id, {})
-
-        # Apply scope filter (e.g., scope="configs" -> module must be None)
-        if scope_module == "configs" and file_info.get("module") is not None:
-            continue
-
-        if (
-            file_id not in results_by_file
-            or sim > results_by_file[file_id]["similarity"]
-        ):
-            result = {
-                "file_id": file_id,
-                "file_path": file_info.get("file_path", ""),
-                "filename": file_info.get("filename", ""),
-                "module": file_info.get("module"),
-                "similarity": sim,
-                "snippet": meta.get("snippet", ""),
-            }
-            if "heading" in meta:
-                result["matched_heading"] = meta.get("heading")
-                result["chunk_index"] = meta.get("chunk_index")
-            results_by_file[file_id] = result
-
-    results = sorted(
-        results_by_file.values(),
-        key=lambda x: x["similarity"],
-        reverse=True,
+    return embedding_store.search_chunks(
+        query,
+        limit=limit,
+        min_similarity=min_similarity,
+        file_filter=file_filter,
     )
-    return results[:limit]
 
 
 def vault_related(
