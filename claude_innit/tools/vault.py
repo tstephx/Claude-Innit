@@ -168,6 +168,10 @@ def vault_index(
     return indexer.index(force=force)
 
 
+_MAX_LIMIT = 100
+_SNIPPET_LEN = 200
+
+
 def vault_search(
     db: MemoryDatabase,
     query: str,
@@ -183,6 +187,10 @@ def vault_search(
     method="text": FTS only
     method="semantic": semantic only
     """
+    limit = max(0, min(limit, _MAX_LIMIT))
+    if limit == 0:
+        return []
+
     module_filter = None
     # scope="configs" means framework dirs only (module is None)
     scope_module = "configs" if scope == "configs" else None
@@ -216,14 +224,26 @@ def vault_search(
 
 
 def _fts_search(db, query, scope, limit, module_filter):
-    """Run FTS search (extracted for reuse)."""
+    """Run FTS search and return compact results with snippet."""
     if scope == "configs":
-        results = db.vault_fts_search(query, limit=limit * 2)
-        results = [r for r in results if r.get("module") is None][:limit]
+        raw = db.vault_fts_search(query, limit=limit * 2)
+        raw = [r for r in raw if r.get("module") is None][:limit]
     else:
-        results = db.vault_fts_search(query, limit=limit, module=module_filter)
-    for i, r in enumerate(results):
-        r["score"] = 1.0 - (i * 0.02)
+        raw = db.vault_fts_search(query, limit=limit, module=module_filter)
+    results = []
+    for i, r in enumerate(raw):
+        filename = r.get("filename", "")
+        results.append(
+            {
+                "file_id": r.get("file_id"),
+                "file_path": r.get("file_path", ""),
+                "filename": filename,
+                "title": Path(filename).stem if filename else "",
+                "module": r.get("module"),
+                "snippet": (r.get("content") or "")[:_SNIPPET_LEN],
+                "score": 1.0 - (i * 0.02),
+            }
+        )
     return results
 
 

@@ -218,3 +218,58 @@ class TestFederatedSearch:
     def test_empty_query(self, db):
         results = federated_search(db, "xyznonexistent12345")
         assert results["merged"] == []
+
+
+class TestFederatedVaultTitle:
+    """Bug #2: Vault results in merged federated output should have title field."""
+
+    def test_vault_results_have_title(self, db):
+        db.upsert_vault_file(
+            "/vault/API Migration.md",
+            "API Migration.md",
+            "Led a cross-team API migration",
+            "h1",
+            module="bs",
+        )
+        results = federated_search(db, "API migration", sources=["vault"])
+        assert len(results["vault"]) >= 1
+        for item in results["vault"]:
+            assert "title" in item, "Vault results should have 'title' field"
+
+    def test_vault_title_in_merged(self, db):
+        db.upsert_vault_file(
+            "/vault/story.md",
+            "story.md",
+            "behavioral interview preparation",
+            "h1",
+        )
+        results = federated_search(db, "behavioral interview", sources=["vault"])
+        for item in results["merged"]:
+            assert "title" in item, "Merged vault results should have 'title'"
+
+    def test_vault_title_is_filename_stem(self, db):
+        db.upsert_vault_file(
+            "/vault/My Great Note.md",
+            "My Great Note.md",
+            "some content about testing",
+            "h1",
+        )
+        results = federated_search(db, "testing", sources=["vault"])
+        assert len(results["vault"]) >= 1
+        assert results["vault"][0]["title"] == "My Great Note"
+
+
+class TestFederatedLimitClamping:
+    """Bug #3: Negative/zero limits should be clamped in federated_search."""
+
+    def test_negative_limit(self, db):
+        db.upsert_vault_file("/vault/a.md", "a.md", "test content", "h1")
+        results = federated_search(db, "test", limit=-1)
+        assert len(results["merged"]) <= 30, (
+            f"limit=-1 returned {len(results['merged'])} merged results"
+        )
+
+    def test_zero_limit(self, db):
+        db.upsert_vault_file("/vault/a.md", "a.md", "test content", "h1")
+        results = federated_search(db, "test", limit=0)
+        assert results["merged"] == []

@@ -7,6 +7,8 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
+_MAX_LIMIT = 100
+
 from claude_innit.db.database import MemoryDatabase
 
 
@@ -102,8 +104,9 @@ def _search_vault(
             "source": "vault",
             "file_path": r["file_path"],
             "filename": r["filename"],
+            "title": Path(r["filename"]).stem if r.get("filename") else "",
             "module": r.get("module"),
-            "snippet": r["content"][:200],
+            "snippet": (r.get("content") or "")[:200],
             "score": 1.0 - (i * 0.03),
         }
         for i, r in enumerate(results)
@@ -171,6 +174,10 @@ def federated_search(
     Returns:
         {"vault": [...], "books": [...], "sessions": [...], "merged": [...]}
     """
+    limit = max(0, min(limit, _MAX_LIMIT))
+    if limit == 0:
+        return {"merged": []}
+
     if sources is None:
         sources = ["vault", "books", "sessions"]
 
@@ -188,12 +195,14 @@ def federated_search(
                 embedding_store=embedding_store,
                 method="auto",
             )
-            # Re-tag source for outer RRF.
+            # Re-tag source for outer RRF and ensure title field exists.
             # Note: inner hybrid rrf_score is intentionally overwritten by
             # the outer _reciprocal_rank_fusion() — outer RRF uses rank
             # position, not the inner score value. This is correct behavior.
             for r in vault_results:
                 r["source"] = "vault"
+                if "title" not in r:
+                    r["title"] = Path(r.get("filename", "")).stem
         else:
             vault_results = _search_vault(db, query, limit=limit)
         results["vault"] = vault_results

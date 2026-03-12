@@ -319,6 +319,76 @@ class TestVaultStatsEmbeddings:
         assert stats["embeddings"]["self_test"] == "unavailable"
 
 
+class TestVaultSearchCompactResults:
+    """Bug #1: FTS results should return compact results with snippet, not full DB rows."""
+
+    def test_fts_results_have_snippet_not_content(self, db, vault_dir):
+        vault_index(db, vault_root=str(vault_dir))
+        results = vault_search(db, query="migration", method="text")
+        assert len(results) >= 1
+        for r in results:
+            assert "snippet" in r, "FTS results should have 'snippet' field"
+            assert "content" not in r, "FTS results should not expose full 'content'"
+
+    def test_fts_results_strip_db_internals(self, db, vault_dir):
+        vault_index(db, vault_root=str(vault_dir))
+        results = vault_search(db, query="conflict", method="text")
+        assert len(results) >= 1
+        for r in results:
+            assert "content_hash" not in r, "Should not expose content_hash"
+            assert "file_size" not in r, "Should not expose file_size"
+            assert "indexed_at" not in r, "Should not expose indexed_at"
+            assert "frontmatter" not in r, "Should not expose frontmatter"
+
+    def test_fts_snippet_is_truncated(self, db, vault_dir):
+        vault_index(db, vault_root=str(vault_dir))
+        results = vault_search(db, query="migration", method="text")
+        assert len(results) >= 1
+        for r in results:
+            assert len(r["snippet"]) <= 200
+
+    def test_fts_results_have_title(self, db, vault_dir):
+        vault_index(db, vault_root=str(vault_dir))
+        results = vault_search(db, query="conflict", method="text")
+        assert len(results) >= 1
+        for r in results:
+            assert "title" in r, "FTS results should have 'title' field"
+            assert not r["title"].endswith(".md"), (
+                "Title should not include .md extension"
+            )
+
+    def test_fts_results_keep_essential_fields(self, db, vault_dir):
+        vault_index(db, vault_root=str(vault_dir))
+        results = vault_search(db, query="migration", method="text")
+        assert len(results) >= 1
+        r = results[0]
+        assert "file_path" in r
+        assert "filename" in r
+        assert "module" in r
+        assert "score" in r
+
+
+class TestVaultSearchLimitClamping:
+    """Bug #3: Negative/zero limits should be clamped, not passed to SQLite."""
+
+    def test_negative_limit_does_not_dump_all(self, db, vault_dir):
+        vault_index(db, vault_root=str(vault_dir))
+        results = vault_search(db, query="conflict", method="text", limit=-1)
+        assert len(results) <= 20, (
+            f"limit=-1 returned {len(results)} results, expected <= 20"
+        )
+
+    def test_zero_limit_returns_empty(self, db, vault_dir):
+        vault_index(db, vault_root=str(vault_dir))
+        results = vault_search(db, query="conflict", method="text", limit=0)
+        assert results == []
+
+    def test_large_limit_is_capped(self, db, vault_dir):
+        vault_index(db, vault_root=str(vault_dir))
+        results = vault_search(db, query="conflict", method="text", limit=10000)
+        assert len(results) <= 100, "Limit should be capped at a reasonable maximum"
+
+
 class TestVaultSearchFailLoud:
     def test_semantic_fails_without_store(self, db, vault_dir):
         vault_index(db, vault_root=str(vault_dir))
