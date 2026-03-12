@@ -1,7 +1,6 @@
 """Vault file indexing, search, and stats for OBF unified search."""
 
 import hashlib
-import json
 import logging
 import time
 from datetime import datetime
@@ -20,12 +19,16 @@ def _content_hash(content: str) -> str:
     return hashlib.sha256(content.encode("utf-8")).hexdigest()
 
 
+_FRAMEWORK_DIRS = frozenset({"daily", "inbox", "archive", "claude-memory"})
+
+
 def _detect_module(file_path: str, vault_root: str) -> Optional[str]:
     """Detect which module a file belongs to from its path.
 
     Convention: files under `<vault_root>/<module_name>/` belong to that module.
-    Files at vault root return None. Dot-prefixed framework dirs (.brain/, .claude/)
-    are excluded from indexing via exclude_patterns, not here.
+    Files at vault root return None. Named framework dirs (Daily, Inbox, Archive,
+    Claude-Memory) return None — they are organizational, not content modules.
+    Dot-prefixed dirs (.brain/, .claude/) are excluded via VaultIndexer.exclude_patterns.
     """
     try:
         rel = Path(file_path).relative_to(vault_root)
@@ -37,8 +40,10 @@ def _detect_module(file_path: str, vault_root: str) -> Optional[str]:
         return None
 
     first_dir = parts[0]
-    # Return lowercased for consistent module naming regardless of filesystem casing
-    return first_dir.lower()
+    lowered = first_dir.lower()
+    if lowered in _FRAMEWORK_DIRS:
+        return None
+    return lowered
 
 
 class VaultIndexer:
@@ -102,8 +107,9 @@ class VaultIndexer:
                 content = md_file.read_text(encoding="utf-8", errors="replace")
                 h = _content_hash(content)
 
+                existing = self.db.get_vault_file(file_path_str)
+
                 if not force:
-                    existing = self.db.get_vault_file(file_path_str)
                     if existing and existing["content_hash"] == h:
                         stats["unchanged"] += 1
                         continue
@@ -112,7 +118,7 @@ class VaultIndexer:
                 module = _detect_module(file_path_str, str(self.vault_root))
                 mod_time = datetime.fromtimestamp(md_file.stat().st_mtime).isoformat()
 
-                is_update = self.db.get_vault_file(file_path_str) is not None
+                is_update = existing is not None
 
                 self.db.upsert_vault_file(
                     file_path=file_path_str,
@@ -170,51 +176,101 @@ def vault_search(
     embedding_store: Optional[EmbeddingStore] = None,
     method: str = "auto",
 ) -> list[dict]:
-    """Search vault files.
+    """Search vault files with optional hybrid FTS + semantic fusion.
 
-    Args:
-        db: Database connection
-        query: Search query
-        scope: "vault" (vault files only), "configs" (framework config files), "all"
-        limit: Maximum results
-        embedding_store: Optional for semantic search
-        method: "auto", "text", or "semantic"
-
-    Returns: List of matching vault file dicts with score/similarity
+    method="auto": runs BOTH FTS and semantic, merges with mini-RRF.
+                   Falls back to FTS-only if no embedding_store.
+    method="text": FTS only
+    method="semantic": semantic only
     """
     module_filter = None
+    # scope="configs" means framework dirs only (module is None)
+    scope_module = "configs" if scope == "configs" else None
 
-    if method == "auto":
-        word_count = len(query.split())
-        method = "text" if word_count <= 3 else "semantic"
-
-    if method == "text":
-        if scope == "configs":
-            # Config files are in framework dirs (module=None).
-            # Only .md files are indexed, so filter to module=None entries.
-            results = db.vault_fts_search(query, limit=limit * 2)
-            results = [r for r in results if r.get("module") is None][:limit]
-        else:
-            # Note: scope="vault" and scope="all" are currently equivalent since
-            # only vault .md files are indexed. If non-vault sources (e.g., external
-            # project docs) are added to the index later, scope="vault" should filter
-            # to files under the vault root only.
-            results = db.vault_fts_search(query, limit=limit, module=module_filter)
-
-        # Add score field for consistency
-        for i, r in enumerate(results):
-            r["score"] = 1.0 - (i * 0.02)  # FTS rank-order approximation
-        return results
+    if method == "text" or (method == "auto" and embedding_store is None):
+        return _fts_search(db, query, scope, limit, module_filter)
 
     elif method == "semantic":
         if embedding_store is None:
             raise ValueError(
-                "Semantic search unavailable: no embedding store configured. "
-                "Run vault_index to generate embeddings."
+                "Semantic search unavailable: no embedding store configured."
             )
-        return vault_semantic_search(embedding_store, query, limit=limit)
+        return vault_semantic_search(
+            embedding_store,
+            query,
+            limit=limit,
+            scope_module=scope_module,
+        )
+
+    elif method == "auto":
+        fts_results = _fts_search(db, query, scope, limit, module_filter)
+        semantic_results = vault_semantic_search(
+            embedding_store,
+            query,
+            limit=limit,
+            scope_module=scope_module,
+        )
+        return _hybrid_merge(fts_results, semantic_results, limit)
 
     return []
+
+
+def _fts_search(db, query, scope, limit, module_filter):
+    """Run FTS search (extracted for reuse)."""
+    if scope == "configs":
+        results = db.vault_fts_search(query, limit=limit * 2)
+        results = [r for r in results if r.get("module") is None][:limit]
+    else:
+        results = db.vault_fts_search(query, limit=limit, module=module_filter)
+    for i, r in enumerate(results):
+        r["score"] = 1.0 - (i * 0.02)
+    return results
+
+
+def _hybrid_merge(
+    fts_results: list[dict],
+    semantic_results: list[dict],
+    limit: int,
+) -> list[dict]:
+    """Merge FTS and semantic results using mini-RRF.
+
+    Fixed weights: FTS=0.4, semantic=0.6.
+    k=20 (tighter than federated search's k=60).
+
+    rrf_score is the authoritative ranking field in hybrid output.
+    Raw FTS 'score' and semantic 'similarity' are stripped to avoid
+    ambiguity for downstream consumers.
+    """
+    k = 20
+    fts_weight = 0.4
+    sem_weight = 0.6
+
+    scored = {}
+
+    for rank, item in enumerate(fts_results):
+        key = item.get("file_path", f"fts:{rank}")
+        rrf_score = fts_weight / (k + rank)
+        entry = {**item, "rrf_score": rrf_score, "match_type": "fts"}
+        entry.pop("score", None)  # Remove raw FTS score
+        scored[key] = entry
+
+    for rank, item in enumerate(semantic_results):
+        key = item.get("file_path", f"sem:{rank}")
+        rrf_score = sem_weight / (k + rank)
+        if key in scored:
+            scored[key]["rrf_score"] += rrf_score
+            scored[key]["match_type"] = "hybrid"
+            scored[key].pop("similarity", None)
+            if item.get("matched_heading"):
+                scored[key]["matched_heading"] = item["matched_heading"]
+        else:
+            entry = {**item, "rrf_score": rrf_score, "match_type": "semantic"}
+            entry.pop("score", None)
+            entry.pop("similarity", None)
+            scored[key] = entry
+
+    merged = sorted(scored.values(), key=lambda x: x["rrf_score"], reverse=True)
+    return merged[:limit]
 
 
 def vault_semantic_search(
@@ -222,37 +278,75 @@ def vault_semantic_search(
     query: str,
     limit: int = 10,
     min_similarity: float = 0.35,
+    scope_module: Optional[str] = None,
 ) -> list[dict]:
-    """Search vault files by semantic similarity."""
+    """Search vault files by semantic similarity using chunk embeddings.
+
+    Uses pre-computed embedding matrix for fast vectorized search.
+    Always deduplicates by file — returns one result per file with
+    the best-scoring chunk's metadata (matched_heading, chunk_index).
+    Recency boost is pre-applied via the matrix's recency weights.
+
+    Args:
+        scope_module: If "configs", only return files where module is None
+                      (framework config dirs). None means no filter.
+    """
     if embedding_store.db is None:
         return []
 
     import numpy as np
 
-    query_embedding = embedding_store.generate(query)
+    # Ensure matrix is loaded
+    if not embedding_store._matrix_loaded:
+        embedding_store.load_matrix()
 
-    rows = embedding_store.db.execute(
-        """
-        SELECT ve.file_id, ve.embedding, vf.*
-        FROM vault_embeddings ve
-        JOIN vault_files vf ON ve.file_id = vf.file_id
-        """
-    ).fetchall()
+    if embedding_store._matrix is None or not embedding_store._chunk_meta:
+        return []
 
-    results = []
-    for row in rows:
-        embedding = np.frombuffer(row["embedding"], dtype=np.float32)
-        similarity = float(
-            np.dot(query_embedding, embedding)
-            / (np.linalg.norm(query_embedding) * np.linalg.norm(embedding))
-        )
-        if similarity >= min_similarity:
-            result = dict(row)
-            result["similarity"] = similarity
-            result["score"] = similarity
-            results.append(result)
+    # Vectorized cosine similarity (both pre-normalized -> dot product)
+    query_vec = embedding_store.query_embedding(query)
+    similarities = np.dot(embedding_store._matrix, query_vec)
 
-    results.sort(key=lambda x: x["similarity"], reverse=True)
+    # Apply pre-computed recency weights (single vectorized multiply)
+    if embedding_store._recency_weights is not None:
+        similarities = similarities * embedding_store._recency_weights
+
+    # Filter and deduplicate by file (keep best chunk per file)
+    results_by_file = {}
+    for i, meta in enumerate(embedding_store._chunk_meta):
+        sim = float(similarities[i])
+        if sim < min_similarity:
+            continue
+
+        file_id = meta["file_id"]
+        file_info = embedding_store._file_meta.get(file_id, {})
+
+        # Apply scope filter (e.g., scope="configs" -> module must be None)
+        if scope_module == "configs" and file_info.get("module") is not None:
+            continue
+
+        if (
+            file_id not in results_by_file
+            or sim > results_by_file[file_id]["similarity"]
+        ):
+            result = {
+                "file_id": file_id,
+                "file_path": file_info.get("file_path", ""),
+                "filename": file_info.get("filename", ""),
+                "module": file_info.get("module"),
+                "similarity": sim,
+                "snippet": meta.get("snippet", ""),
+            }
+            if "heading" in meta:
+                result["matched_heading"] = meta.get("heading")
+                result["chunk_index"] = meta.get("chunk_index")
+            results_by_file[file_id] = result
+
+    results = sorted(
+        results_by_file.values(),
+        key=lambda x: x["similarity"],
+        reverse=True,
+    )
     return results[:limit]
 
 

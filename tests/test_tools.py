@@ -1,7 +1,5 @@
 """Tests for MCP tools."""
 
-import pytest
-from pathlib import Path
 
 import yaml
 

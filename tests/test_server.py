@@ -1,9 +1,7 @@
 """Tests for MCP server."""
 
 import pytest
-import asyncio
 import json
-from pathlib import Path
 
 from claude_innit.server import create_server
 

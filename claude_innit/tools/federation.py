@@ -36,10 +36,9 @@ def _search_books(
         # Read-only: avoid blocking the book-library MCP
         conn.execute("PRAGMA query_only = ON")
 
-        import re
+        from claude_innit.utils import sanitize_fts_query
 
-        words = re.findall(r"\w+", query)
-        safe_query = " ".join(f'"{w}"' for w in words) if words else query
+        safe_query = sanitize_fts_query(query)
         rows = conn.execute(
             """
             SELECT
@@ -156,6 +155,8 @@ def federated_search(
     limit: int = 30,
     book_db_path: Optional[Path] = None,
     weights: Optional[dict[str, float]] = None,
+    rrf_k: int = 60,
+    embedding_store=None,
 ) -> dict:
     """Search across vault, book-library, and session memory.
 
@@ -177,7 +178,24 @@ def federated_search(
     result_lists = []
 
     if "vault" in sources:
-        vault_results = _search_vault(db, query, limit=limit)
+        if embedding_store is not None:
+            from claude_innit.tools.vault import vault_search as _vault_search
+
+            vault_results = _vault_search(
+                db,
+                query,
+                limit=limit,
+                embedding_store=embedding_store,
+                method="auto",
+            )
+            # Re-tag source for outer RRF.
+            # Note: inner hybrid rrf_score is intentionally overwritten by
+            # the outer _reciprocal_rank_fusion() — outer RRF uses rank
+            # position, not the inner score value. This is correct behavior.
+            for r in vault_results:
+                r["source"] = "vault"
+        else:
+            vault_results = _search_vault(db, query, limit=limit)
         results["vault"] = vault_results
         result_lists.append(vault_results)
 
@@ -201,5 +219,9 @@ def federated_search(
         results["sessions"] = session_results
         result_lists.append(session_results)
 
-    results["merged"] = _reciprocal_rank_fusion(result_lists, weights=weights)[:limit]
+    results["merged"] = _reciprocal_rank_fusion(
+        result_lists,
+        weights=weights,
+        k=rrf_k,
+    )[:limit]
     return results

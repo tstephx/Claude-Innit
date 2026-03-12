@@ -1,15 +1,11 @@
 """Tests for vault indexing, search, and stats."""
 
 import json
-import os
-import tempfile
-from pathlib import Path
 
 import pytest
 
 from claude_innit.db.database import MemoryDatabase
 from claude_innit.tools.vault import (
-    VaultIndexer,
     vault_index,
     vault_search,
     vault_related,
@@ -112,13 +108,31 @@ class TestParsingHelpers:
         assert _detect_module(str(vault / "CLAUDE.md"), str(vault)) is None
 
     def test_detect_module_framework_dirs(self, tmp_path):
+        """Named framework dirs (Daily, Inbox, Archive, Claude-Memory) return None."""
         vault = tmp_path / "vault"
         vault.mkdir()
         assert (
             _detect_module(str(vault / "Daily" / "2026-01-01.md"), str(vault)) is None
         )
         assert _detect_module(str(vault / "Inbox" / "note.md"), str(vault)) is None
-        assert _detect_module(str(vault / ".brain" / "config.yaml"), str(vault)) is None
+        assert _detect_module(str(vault / "Archive" / "old.md"), str(vault)) is None
+        assert (
+            _detect_module(str(vault / "Claude-Memory" / "ctx.md"), str(vault)) is None
+        )
+
+    def test_detect_module_dot_dirs_are_modules(self, tmp_path):
+        """Dot-prefixed dirs (.brain, .claude) are excluded by VaultIndexer
+        exclude_patterns, not by _detect_module — so _detect_module returns them."""
+        vault = tmp_path / "vault"
+        vault.mkdir()
+        assert (
+            _detect_module(str(vault / ".brain" / "config.yaml"), str(vault))
+            == ".brain"
+        )
+        assert (
+            _detect_module(str(vault / ".claude" / "settings.json"), str(vault))
+            == ".claude"
+        )
 
     def test_detect_module_lowercases_name(self, tmp_path):
         vault = tmp_path / "vault"
@@ -190,7 +204,7 @@ class TestVaultIndexer:
         nm = vault_dir / "node_modules" / "pkg"
         nm.mkdir(parents=True)
         (nm / "README.md").write_text("# Package\n")
-        result = vault_index(db, vault_root=str(vault_dir))
+        vault_index(db, vault_root=str(vault_dir))
         # node_modules file should be excluded
         assert db.get_vault_file(str(nm / "README.md")) is None
 
@@ -258,6 +272,8 @@ class TestVaultStats:
         assert isinstance(stats["stale_count"], int)
         assert isinstance(stats["index_age_seconds"], float)
         assert stats["last_indexed"] is not None
+        assert "embeddings" in stats
+        assert isinstance(stats["embeddings"], dict)
 
     def test_stats_by_module(self, db, vault_dir):
         vault_index(db, vault_root=str(vault_dir))
@@ -286,10 +302,11 @@ class TestVaultStatsEmbeddings:
 
         assert "embeddings" in stats
         emb = stats["embeddings"]
-        assert "total" in emb
-        assert "orphaned" in emb
-        assert "missing" in emb
+        assert "total_files" in emb
+        assert "chunk_embeddings" in emb
+        assert "legacy_embeddings" in emb
         assert "model" in emb
+        assert "mode" in emb
         assert "self_test" in emb
         assert emb["self_test"] in ("pass", "fail", "unavailable")
 

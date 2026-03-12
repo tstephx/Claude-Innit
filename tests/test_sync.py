@@ -1,9 +1,6 @@
 """Tests for markdown sync module."""
 
-import pytest
-from pathlib import Path
 
-from claude_innit.db.database import MemoryDatabase
 from claude_innit.sync.markdown_sync import MarkdownSync
 
 

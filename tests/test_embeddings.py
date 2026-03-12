@@ -1,6 +1,5 @@
 """Tests for embeddings module."""
 
-import pytest
 import numpy as np
 
 from claude_innit.db.database import MemoryDatabase

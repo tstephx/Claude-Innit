@@ -50,9 +50,10 @@ class InnitServer:
         self.vault_root = vault_root
         self.extra_index_paths = extra_index_paths or []
         self.embedding_store = EmbeddingStore(db)
-        # Pre-load embedding model to avoid MCP timeout on first semantic query
+        # Pre-load embedding model and matrix to avoid timeout on first query
         try:
             self.embedding_store.warm()
+            self.embedding_store.load_matrix()
         except Exception:
             pass  # Embeddings optional — degrade gracefully if torch missing
         self._tools = self._define_tools()
@@ -302,6 +303,14 @@ class InnitServer:
                 inputSchema={"type": "object", "properties": {}},
             ),
             Tool(
+                name="vault_rechunk",
+                description=(
+                    "Force re-chunk and re-embed all vault files. "
+                    "Use when chunking parameters change or chunks seem stale."
+                ),
+                inputSchema={"type": "object", "properties": {}},
+            ),
+            Tool(
                 name="federated_search",
                 description=(
                     "Search across vault, book library, and session memory simultaneously. "
@@ -413,6 +422,17 @@ class InnitServer:
                             thread_db.close()
 
                     result = await asyncio.to_thread(_threaded_vault_index)
+
+                    # Generate chunk embeddings and reload matrix
+                    if self.embedding_store:
+                        chunk_result = await asyncio.to_thread(
+                            self.embedding_store.batch_store_chunk_embeddings,
+                        )
+                        result["chunks"] = chunk_result
+                        matrix_count = await asyncio.to_thread(
+                            self.embedding_store.load_matrix,
+                        )
+                        result["matrix_loaded"] = matrix_count
             elif name == "vault_search":
                 try:
                     result = vault_search(
@@ -436,12 +456,26 @@ class InnitServer:
                 )
             elif name == "vault_stats":
                 result = vault_stats(self.db, embedding_store=self.embedding_store)
+            elif name == "vault_rechunk":
+                if self.embedding_store:
+                    result = await asyncio.to_thread(
+                        self.embedding_store.batch_store_chunk_embeddings,
+                        force=True,
+                    )
+                    matrix_count = await asyncio.to_thread(
+                        self.embedding_store.load_matrix,
+                    )
+                    result["matrix_reloaded"] = matrix_count
+                else:
+                    result = {"error": "No embedding store configured"}
             elif name == "federated_search":
                 result = federated_search(
                     self.db,
                     query=arguments["query"],
                     sources=arguments.get("sources"),
                     limit=arguments.get("limit", 30),
+                    rrf_k=arguments.get("rrf_k", 60),
+                    embedding_store=self.embedding_store,
                 )
             else:
                 result = {"error": f"Unknown tool: {name}"}

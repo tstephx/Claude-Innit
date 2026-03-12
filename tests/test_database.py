@@ -1,7 +1,6 @@
 """Tests for database module."""
 
 import pytest
-from pathlib import Path
 
 from claude_innit.db.database import MemoryDatabase
 
@@ -116,12 +115,18 @@ def test_cleanup_orphan_vault_embeddings(tmp_path):
         (real_id, blob, "test-model"),
     )
 
-    # Insert an orphan embedding (file_id 9999 doesn't exist)
-    db.execute(
+    # Create an orphan: commit pending work, then use a raw connection with FK off
+    db.commit()
+    import sqlite3
+
+    raw_conn = sqlite3.connect(str(tmp_path / "test.db"))
+    raw_conn.execute("PRAGMA foreign_keys = OFF")
+    raw_conn.execute(
         "INSERT INTO vault_embeddings (file_id, embedding, model) VALUES (?, ?, ?)",
         (9999, blob, "test-model"),
     )
-    db.commit()
+    raw_conn.commit()
+    raw_conn.close()
 
     # Verify orphan exists
     count = db.execute("SELECT COUNT(*) FROM vault_embeddings").fetchone()[0]
@@ -144,12 +149,13 @@ def test_vault_embedding_stats(tmp_path):
 
     # Empty state
     stats = db.vault_embedding_stats()
-    assert stats["total"] == 0
-    assert stats["orphaned"] == 0
-    assert stats["missing"] == 0
+    assert stats["total_files"] == 0
+    assert stats["legacy_embeddings"] == 0
+    assert stats["chunk_embeddings"] == 0
     assert stats["model"] is None
+    assert stats["mode"] == "legacy"
 
-    # Add file + embedding
+    # Add file + legacy embedding
     db.upsert_vault_file("/a.md", "a.md", "content", "h1")
     file_id = db.get_vault_file("/a.md")["file_id"]
     blob = np.zeros(384, dtype=np.float32).tobytes()
@@ -163,11 +169,10 @@ def test_vault_embedding_stats(tmp_path):
     db.commit()
 
     stats = db.vault_embedding_stats()
-    assert stats["total"] == 1
-    assert stats["with_embeddings"] == 1
-    assert stats["missing"] == 1
-    assert stats["orphaned"] == 0
+    assert stats["total_files"] == 2
+    assert stats["legacy_embeddings"] == 1
     assert stats["model"] == "all-MiniLM-L6-v2"
+    assert stats["mode"] == "legacy"
 
 
 @pytest.mark.parametrize(
