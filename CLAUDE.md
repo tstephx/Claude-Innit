@@ -16,7 +16,7 @@ MCP server giving Claude persistent memory across sessions. Three categories (pe
 - `data/memories/` — contains personal context. **Verify this is gitignored before committing.** Add `data/memories/sessions/` to `.gitignore` if not already excluded.
 - For deployed use: store DB + memories outside repo and point server at that location.
 
-## MCP Tools (13)
+## MCP Tools (14)
 
 → Full tool reference: [`ref/tools.md`](ref/tools.md)
 
@@ -35,11 +35,12 @@ MCP server giving Claude persistent memory across sessions. Three categories (pe
 ### Vault Tools (OBF)
 | Tool | Purpose |
 |------|---------|
-| `vault_index` | Index vault .md files (hash-based incremental, force option) |
-| `vault_search` | Search vault files (FTS5 or semantic, scope: vault/configs/all) |
+| `vault_index` | Index vault .md files, generate chunk embeddings, reload matrix |
+| `vault_search` | Hybrid FTS+semantic search (auto/text/semantic, scope: vault/configs/all) |
 | `vault_related` | Find notes similar to a given note (embeddings or filename fallback) |
 | `vault_stats` | Vault health metrics (by module, status, inbox count, stale count, embedding health) |
-| `federated_search` | RRF score fusion across vault, book-library, and session memory |
+| `vault_rechunk` | Force re-chunk all vault files and regenerate embeddings |
+| `federated_search` | Two-level RRF fusion across vault (hybrid), book-library, and session memory |
 
 ## Key Design Decisions
 
@@ -47,22 +48,28 @@ MCP server giving Claude persistent memory across sessions. Three categories (pe
 
 - **Markdown-first**: `data/memories/` is truth; DB is index
 - **Search routing**: 1-3 words → FTS5 (fast), 4+ → semantic (conceptual)
+- **Heading-level chunking**: vault files split at `##`/`###` headings with paragraph fallback for large sections (`utils_chunking.py`). Chunks stored in `vault_chunks` table with FK to `vault_files`
+- **Hybrid search**: `vault_search(method="auto")` runs both FTS5 and semantic, merges via mini-RRF (k=20, FTS=0.4, semantic=0.6). `method="text"` or `method="semantic"` for single-mode
+- **Pre-computed matrix**: `EmbeddingStore.load_matrix()` builds normalized numpy embedding matrix at startup for fast vectorized cosine similarity via `np.dot`. Recency weights pre-applied as numpy array
+- **Query cache**: `@functools.lru_cache(maxsize=64)` on query embeddings — repeated queries skip model inference
+- **Two-level RRF**: inner hybrid k=20 for vault search, outer federated k=60 across sources (vault, book-library, sessions)
 - **Eager embedding**: `EmbeddingStore.warm()` pre-loads model at server startup to avoid MCP timeout on first semantic query
 - **Model**: all-MiniLM-L6-v2 (384-dim), `min_similarity=0.35` threshold; numpy/torch are optional deps (`pip install .[embeddings]`)
 - **WAL mode**: enabled on all connections — concurrent reads + single writer, eliminates SQLITE_BUSY
 - **Error boundary**: `call_tool` wraps all dispatches — no tool failure can crash the MCP connection
 - **Async startup sync**: `sync_all()` runs in background after server accepts connections
-- **Thread safety**: `vault_index` creates a dedicated DB connection in `asyncio.to_thread()` — never shares the server's connection across threads
+- **Thread safety**: `vault_index` creates a dedicated DB connection in `asyncio.to_thread()` — never shares the server's connection across threads. `load_matrix()` also wrapped in `asyncio.to_thread()`
 - **Vault root**: configurable via `VAULT_ROOT` env var, defaults to `~/Dev/Obsidian-Second-Brain`
 - **Extra index paths**: `EXTRA_INDEX_PATHS` env var (colon-separated), defaults to `~/Dev/_Lab:~/Dev/_Projects` — indexed alongside vault on `vault_index`
 - **Fail-loud semantic**: `vault_search(method="semantic")` raises `ValueError` when no embedding store, instead of returning empty results
-- **Orphan cleanup**: `vault_index` auto-cleans orphaned vault embeddings after each run
+- **Orphan cleanup**: `vault_index` auto-cleans orphaned vault/chunk embeddings after each run
 - **Module detection**: `_detect_module()` in `tools/vault.py` — lowercased top-level folder name, excludes framework dirs (`.`, Daily, Inbox, Archive, Claude-Memory)
 - **Metadata key**: memories use `metadata["project"]` — queries use `json_extract(metadata, '$.project')`
+- **Schema**: `vault_chunks` + `vault_chunk_embeddings` tables with FK constraints. Legacy `vault_embeddings` table deprecated (still present for backward compat)
 
 ## Commands
 ```bash
-.venv/bin/python -m pytest tests/ -v    # all tests (100 total)
+.venv/bin/python -m pytest tests/ -v    # all tests (101 total)
 .venv/bin/python -m claude_innit.server # run MCP server
 pip install -e ".[embeddings,dev]"      # dev install with all deps
 pip install -e .                        # minimal install (no embeddings)
