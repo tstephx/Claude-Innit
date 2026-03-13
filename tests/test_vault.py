@@ -598,3 +598,57 @@ class TestHybridMerge:
         sem = [_sem_item("/d.md", matched_heading="## Overview")]
         results = _hybrid_merge(fts, sem, limit=10)
         assert results[0]["matched_heading"] == "## Overview"
+
+
+# ---------------------------------------------------------------------------
+# Skipped edge cases from manual test plan (Part 3)
+# ---------------------------------------------------------------------------
+
+
+class TestVaultSearchEdgeCases:
+    """Edge cases skipped during manual testing — now automated."""
+
+    def test_very_long_query(self, db, vault_dir):
+        """vault_search with a 10K character query does not crash."""
+        vault_index(db, vault_root=str(vault_dir))
+        long_query = "x" * 10000
+        results = vault_search(db, long_query, method="text")
+        assert isinstance(results, list)
+
+    def test_invalid_method_falls_through(self, db, vault_dir):
+        """vault_search with an unrecognized method returns empty list."""
+        vault_index(db, vault_root=str(vault_dir))
+        results = vault_search(db, "test", method="invalid_method")
+        assert results == []
+
+    def test_invalid_scope_treats_as_all(self, db, vault_dir):
+        """vault_search with unrecognized scope still returns results."""
+        vault_index(db, vault_root=str(vault_dir))
+        results = vault_search(db, "conflict", scope="nonexistent", method="text")
+        assert isinstance(results, list)
+
+    def test_semantic_without_store_raises(self, db, vault_dir):
+        """vault_search(method='semantic') without embedding_store raises ValueError."""
+        vault_index(db, vault_root=str(vault_dir))
+        with pytest.raises(ValueError, match="[Ss]emantic"):
+            vault_search(db, "test", method="semantic", embedding_store=None)
+
+    def test_vault_related_empty_path(self, db):
+        """vault_related with empty string returns empty list."""
+        results = vault_related(db, "")
+        assert results == []
+
+    def test_vault_related_nonexistent(self, db):
+        """vault_related with nonexistent path returns empty list."""
+        results = vault_related(db, "/nonexistent/path.md")
+        assert results == []
+
+    def test_vault_stats_empty_db(self, tmp_path):
+        """vault_stats on empty database returns sensible defaults."""
+        db = MemoryDatabase(tmp_path / "test.db")
+        stats = vault_stats(db)
+        assert stats["total_notes"] == 0
+        assert stats["inbox_count"] == 0
+        assert stats["stale_count"] == 0
+        assert stats["index_age_seconds"] == -1.0
+        assert stats["last_indexed"] is None
