@@ -425,14 +425,17 @@ class InnitServer:
 
                     # Generate chunk embeddings and reload matrix
                     if self.embedding_store:
-                        chunk_result = await asyncio.to_thread(
-                            self.embedding_store.batch_store_chunk_embeddings,
-                        )
-                        result["chunks"] = chunk_result
-                        matrix_count = await asyncio.to_thread(
-                            self.embedding_store.load_matrix,
-                        )
-                        result["matrix_loaded"] = matrix_count
+                        try:
+                            chunk_result = await asyncio.to_thread(
+                                self.embedding_store.batch_store_chunk_embeddings,
+                            )
+                            result["chunks"] = chunk_result
+                            matrix_count = await asyncio.to_thread(
+                                self.embedding_store.load_matrix,
+                            )
+                            result["matrix_loaded"] = matrix_count
+                        except ImportError:
+                            result["embeddings"] = "skipped (numpy not installed)"
             elif name == "vault_search":
                 try:
                     result = vault_search(
@@ -458,14 +461,19 @@ class InnitServer:
                 result = vault_stats(self.db, embedding_store=self.embedding_store)
             elif name == "vault_rechunk":
                 if self.embedding_store:
-                    result = await asyncio.to_thread(
-                        self.embedding_store.batch_store_chunk_embeddings,
-                        force=True,
-                    )
-                    matrix_count = await asyncio.to_thread(
-                        self.embedding_store.load_matrix,
-                    )
-                    result["matrix_reloaded"] = matrix_count
+                    try:
+                        result = await asyncio.to_thread(
+                            self.embedding_store.batch_store_chunk_embeddings,
+                            force=True,
+                        )
+                        matrix_count = await asyncio.to_thread(
+                            self.embedding_store.load_matrix,
+                        )
+                        result["matrix_reloaded"] = matrix_count
+                    except ImportError:
+                        result = {
+                            "error": "numpy not installed — embeddings unavailable"
+                        }
                 else:
                     result = {"error": "No embedding store configured"}
             elif name == "federated_search":

@@ -101,6 +101,10 @@ class EmbeddingStore:
             self._file_meta = {r["file_id"]: dict(r) for r in file_rows}
 
         # Build embedding matrix (pre-normalized)
+        if np is None:
+            raise ImportError(
+                "numpy is required for embeddings — install with: pip install claude-innit[embeddings]"
+            )
         embeddings = np.array(
             [np.frombuffer(r["embedding"], dtype=np.float32) for r in rows]
         )
@@ -160,6 +164,10 @@ class EmbeddingStore:
 
     def query_embedding(self, query: str):
         """Get normalized query embedding with LRU cache."""
+        if np is None:
+            raise ImportError(
+                "numpy is required for embeddings — install with: pip install claude-innit[embeddings]"
+            )
         cached = self._cached_query_embedding(query)
         vec = np.array(cached, dtype=np.float32)
         vec /= np.linalg.norm(vec) + 1e-10
