@@ -213,6 +213,7 @@ def vault_search(
     limit: int = 20,
     embedding_store: Optional[EmbeddingStore] = None,
     method: str = "auto",
+    status: Optional[str] = None,
 ) -> list[dict]:
     """Search vault files with optional hybrid FTS + semantic fusion.
 
@@ -220,6 +221,7 @@ def vault_search(
                    Falls back to FTS-only if no embedding_store.
     method="text": FTS only
     method="semantic": semantic only
+    status: optional frontmatter status filter applied to both legs.
     """
     limit = max(0, min(limit, _MAX_LIMIT))
     if limit == 0:
@@ -230,40 +232,63 @@ def vault_search(
     scope_module = "configs" if scope == "configs" else None
 
     if method == "text" or (method == "auto" and embedding_store is None):
-        return _fts_search(db, query, scope, limit, module_filter)
+        return _fts_search(db, query, scope, limit, module_filter, status=status)
 
     elif method == "semantic":
         if embedding_store is None:
             raise ValueError(
                 "Semantic search unavailable: no embedding store configured."
             )
-        return vault_semantic_search(
+        results = vault_semantic_search(
             embedding_store,
             query,
             limit=limit,
             scope_module=scope_module,
         )
+        if status:
+            results = _filter_by_status(db, results, status)
+        return results
 
     elif method == "auto":
-        fts_results = _fts_search(db, query, scope, limit, module_filter)
+        fts_results = _fts_search(db, query, scope, limit, module_filter, status=status)
         semantic_results = vault_semantic_search(
             embedding_store,
             query,
             limit=limit,
             scope_module=scope_module,
         )
+        if status:
+            semantic_results = _filter_by_status(db, semantic_results, status)
         return _hybrid_merge(fts_results, semantic_results, limit)
 
     return []
 
 
-def _fts_search(db, query, scope, limit, module_filter):
+def _filter_by_status(
+    db: MemoryDatabase, results: list[dict], status: str
+) -> list[dict]:
+    """Post-filter search results by frontmatter status."""
+    import json as _json
+
+    filtered = []
+    for r in results:
+        vf = db.get_vault_file(r.get("file_path", ""))
+        if vf:
+            fm = _json.loads(vf.get("frontmatter") or "{}")
+            if fm.get("status") == status:
+                filtered.append(r)
+    return filtered
+
+
+def _fts_search(db, query, scope, limit, module_filter, status=None):
     """Run FTS search and return compact results with snippet."""
     if scope == "configs":
-        raw = db.vault_fts_search(query, limit=limit * 2)
+        raw = db.vault_fts_search(query, limit=limit * 2, status=status)
         raw = [r for r in raw if r.get("module") is None][:limit]
     else:
-        raw = db.vault_fts_search(query, limit=limit, module=module_filter)
+        raw = db.vault_fts_search(
+            query, limit=limit, module=module_filter, status=status
+        )
     results = []
     for i, r in enumerate(raw):
         filename = r.get("filename", "")

@@ -373,7 +373,11 @@ class MemoryDatabase:
         self._conn.commit()
 
     def vault_fts_search(
-        self, query: str, limit: int = 20, module: Optional[str] = None
+        self,
+        query: str,
+        limit: int = 20,
+        module: Optional[str] = None,
+        status: Optional[str] = None,
     ) -> list[dict]:
         """Search vault files using FTS5. Sanitizes query to prevent operator injection."""
         from claude_innit.utils import sanitize_fts_query
@@ -403,7 +407,14 @@ class MemoryDatabase:
                     """,
                     (safe_query, limit),
                 ).fetchall()
-            return [dict(row) for row in rows]
+            results = [dict(row) for row in rows]
+            if status:
+                results = [
+                    r
+                    for r in results
+                    if json.loads(r.get("frontmatter") or "{}").get("status") == status
+                ]
+            return results
         except Exception:
             logger.debug("Vault FTS search error for query %r", query, exc_info=True)
             return []

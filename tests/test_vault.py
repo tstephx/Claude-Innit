@@ -764,6 +764,33 @@ class TestHybridMerge:
 # ---------------------------------------------------------------------------
 
 
+class TestVaultSearchStatusFilter:
+    def test_filter_by_status(self, db, vault_dir):
+        """vault_search with status filter returns only matching files."""
+        vault_index(db, vault_root=str(vault_dir))
+        # "API Migration" has status: draft
+        results = vault_search(db, "migration", method="text", status="draft")
+        assert len(results) >= 1
+        # Verify all results have status=draft
+        for r in results:
+            f = db.get_vault_file(r["file_path"])
+            if f:
+                fm = json.loads(f["frontmatter"]) if f["frontmatter"] else {}
+                assert fm.get("status") == "draft"
+
+    def test_no_status_filter_returns_all(self, db, vault_dir):
+        """vault_search without status returns all matching files."""
+        vault_index(db, vault_root=str(vault_dir))
+        results = vault_search(db, "context", method="text")
+        assert len(results) > 0
+
+    def test_status_filter_no_matches(self, db, vault_dir):
+        """vault_search with non-existent status returns empty."""
+        vault_index(db, vault_root=str(vault_dir))
+        results = vault_search(db, "migration", method="text", status="nonexistent")
+        assert results == []
+
+
 class TestVaultSearchEdgeCases:
     """Edge cases skipped during manual testing — now automated."""
 

@@ -270,6 +270,10 @@ class InnitServer:
                             "enum": ["auto", "text", "semantic"],
                             "description": "Search method (default: auto — text for short queries, semantic for longer)",
                         },
+                        "status": {
+                            "type": "string",
+                            "description": "Filter by frontmatter status (e.g. 'active', 'archived')",
+                        },
                     },
                     "required": ["query"],
                 },
@@ -478,6 +482,7 @@ class InnitServer:
                         limit=arguments.get("limit", 20),
                         embedding_store=self.embedding_store,
                         method=arguments.get("method", "auto"),
+                        status=arguments.get("status"),
                     )
                 except ValueError as e:
                     return [
