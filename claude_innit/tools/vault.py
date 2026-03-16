@@ -103,9 +103,20 @@ class VaultIndexer:
         ]
 
     def _should_exclude(self, path: Path) -> bool:
-        """Check if path matches any exclude pattern."""
+        """Check if path matches any exclude pattern or contains dotdirs."""
         path_str = str(path)
-        return any(pat in path_str for pat in self.exclude_patterns)
+        if any(pat in path_str for pat in self.exclude_patterns):
+            return True
+        # Skip files inside hidden directories (e.g. .vscode-server, .thelounge)
+        for root_dir in [self.vault_root] + self.extra_paths:
+            try:
+                rel = path.relative_to(root_dir)
+                if any(p.startswith(".") for p in rel.parts[:-1]):
+                    return True
+                return False
+            except ValueError:
+                continue
+        return False
 
     def _collect_files(self) -> list[Path]:
         """Collect all .md files from vault root and extra paths."""
