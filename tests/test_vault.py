@@ -152,6 +152,115 @@ class TestParsingHelpers:
             _detect_module(str(vault / "Books" / "summary.md"), str(vault)) == "books"
         )
 
+    def test_detect_module_extra_path_prefixed(self, tmp_path):
+        """Files under extra_paths get path-prefixed module names."""
+        vault = tmp_path / "vault"
+        vault.mkdir()
+        lab = tmp_path / "lab"
+        proj = lab / "my-project"
+        proj.mkdir(parents=True)
+
+        result = _detect_module(
+            str(proj / "README.md"), str(vault), extra_paths=[str(lab)]
+        )
+        assert result == "lab/my-project"
+
+    def test_detect_module_extra_path_nested(self, tmp_path):
+        """Nested files under extra_paths still use top-level project folder."""
+        vault = tmp_path / "vault"
+        vault.mkdir()
+        lab = tmp_path / "lab"
+        deep = lab / "my-project" / "src" / "lib"
+        deep.mkdir(parents=True)
+
+        result = _detect_module(
+            str(deep / "utils.py"), str(vault), extra_paths=[str(lab)]
+        )
+        assert result == "lab/my-project"
+
+    def test_detect_module_extra_path_root_file(self, tmp_path):
+        """Files directly in the extra path root (no project folder) return None."""
+        vault = tmp_path / "vault"
+        vault.mkdir()
+        lab = tmp_path / "lab"
+        lab.mkdir()
+
+        result = _detect_module(
+            str(lab / "stray.md"), str(vault), extra_paths=[str(lab)]
+        )
+        assert result is None
+
+    def test_detect_module_extra_path_lowercases(self, tmp_path):
+        """Extra path modules are lowercased like vault modules."""
+        vault = tmp_path / "vault"
+        vault.mkdir()
+        projects = tmp_path / "projects"
+        proj = projects / "My-Project"
+        proj.mkdir(parents=True)
+
+        result = _detect_module(
+            str(proj / "README.md"), str(vault), extra_paths=[str(projects)]
+        )
+        assert result == "projects/my-project"
+
+    def test_detect_module_extra_path_framework_dirs(self, tmp_path):
+        """Extra-path framework dirs (ref, scripts, docs, shared) return None."""
+        vault = tmp_path / "vault"
+        vault.mkdir()
+        lab = tmp_path / "lab"
+        for d in ["ref", "scripts", "docs", "shared"]:
+            (lab / d).mkdir(parents=True)
+
+        for d in ["ref", "scripts", "docs", "shared"]:
+            result = _detect_module(
+                str(lab / d / "file.md"), str(vault), extra_paths=[str(lab)]
+            )
+            assert result is None, f"Expected None for framework dir '{d}'"
+
+    def test_detect_module_multiple_extra_paths(self, tmp_path):
+        """Module detected from whichever extra path the file is under."""
+        vault = tmp_path / "vault"
+        vault.mkdir()
+        lab = tmp_path / "lab"
+        projects = tmp_path / "projects"
+        (lab / "tool-a").mkdir(parents=True)
+        (projects / "tool-b").mkdir(parents=True)
+
+        assert (
+            _detect_module(
+                str(lab / "tool-a" / "x.md"),
+                str(vault),
+                extra_paths=[str(lab), str(projects)],
+            )
+            == "lab/tool-a"
+        )
+        assert (
+            _detect_module(
+                str(projects / "tool-b" / "y.md"),
+                str(vault),
+                extra_paths=[str(lab), str(projects)],
+            )
+            == "projects/tool-b"
+        )
+
+    def test_detect_module_no_extra_paths_backward_compat(self, tmp_path):
+        """Without extra_paths, existing behavior is unchanged."""
+        vault = tmp_path / "vault"
+        vault.mkdir()
+        result = _detect_module(str(tmp_path / "other" / "file.md"), str(vault))
+        assert result is None
+
+    def test_detect_module_vault_not_prefixed(self, tmp_path):
+        """Vault modules are NOT prefixed — preserves existing behavior."""
+        vault = tmp_path / "vault"
+        vault.mkdir()
+        result = _detect_module(
+            str(vault / "Projects" / "readme.md"),
+            str(vault),
+            extra_paths=[str(tmp_path / "lab")],
+        )
+        assert result == "projects"  # no prefix for vault files
+
 
 class TestVaultIndexer:
     def test_index_counts(self, db, vault_dir):

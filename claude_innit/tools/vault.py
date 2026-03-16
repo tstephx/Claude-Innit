@@ -20,30 +20,50 @@ def _content_hash(content: str) -> str:
 
 
 _FRAMEWORK_DIRS = frozenset({"daily", "inbox", "archive", "claude-memory"})
+_EXTRA_FRAMEWORK_DIRS = frozenset({"ref", "scripts", "docs", "shared"})
 
 
-def _detect_module(file_path: str, vault_root: str) -> Optional[str]:
+def _detect_module(
+    file_path: str,
+    vault_root: str,
+    extra_paths: Optional[list[str]] = None,
+) -> Optional[str]:
     """Detect which module a file belongs to from its path.
 
-    Convention: files under `<vault_root>/<module_name>/` belong to that module.
-    Files at vault root return None. Named framework dirs (Daily, Inbox, Archive,
-    Claude-Memory) return None — they are organizational, not content modules.
-    Dot-prefixed dirs (.brain/, .claude/) are excluded via VaultIndexer.exclude_patterns.
+    Vault files: uses first directory under vault_root as module (no prefix).
+    Extra-path files: uses path-prefixed module name (e.g. "lab/my-project").
+    Framework dirs return None in both contexts.
     """
+    # Try vault root first (no prefix)
     try:
         rel = Path(file_path).relative_to(vault_root)
+        parts = rel.parts
+        if len(parts) < 2:
+            return None
+        first_dir = parts[0]
+        lowered = first_dir.lower()
+        if lowered in _FRAMEWORK_DIRS:
+            return None
+        return lowered
     except ValueError:
-        return None
+        pass
 
-    parts = rel.parts
-    if len(parts) < 2:
-        return None
+    # Try each extra path (with prefix)
+    for ep in extra_paths or []:
+        try:
+            rel = Path(file_path).relative_to(ep)
+            parts = rel.parts
+            if len(parts) < 2:
+                return None
+            project_dir = parts[0].lower()
+            if project_dir in _EXTRA_FRAMEWORK_DIRS:
+                return None
+            prefix = Path(ep).name.lower()
+            return f"{prefix}/{project_dir}"
+        except ValueError:
+            continue
 
-    first_dir = parts[0]
-    lowered = first_dir.lower()
-    if lowered in _FRAMEWORK_DIRS:
-        return None
-    return lowered
+    return None
 
 
 class VaultIndexer:
@@ -115,7 +135,11 @@ class VaultIndexer:
                         continue
 
                 frontmatter, body = _parse_frontmatter(content)
-                module = _detect_module(file_path_str, str(self.vault_root))
+                module = _detect_module(
+                    file_path_str,
+                    str(self.vault_root),
+                    extra_paths=[str(p) for p in self.extra_paths],
+                )
                 mod_time = datetime.fromtimestamp(md_file.stat().st_mtime).isoformat()
 
                 is_update = existing is not None
