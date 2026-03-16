@@ -13,6 +13,7 @@ from claude_innit.tools.vault import (
     vault_stats,
 )
 from claude_innit.tools.federation import federated_search
+from claude_innit.tools.tag import vault_tag
 
 __all__ = [
     "get_context",
@@ -27,4 +28,5 @@ __all__ = [
     "vault_related",
     "vault_stats",
     "federated_search",
+    "vault_tag",
 ]

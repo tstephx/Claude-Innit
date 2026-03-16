@@ -28,6 +28,7 @@ from claude_innit.tools import (
     vault_related,
     vault_stats,
     federated_search,
+    vault_tag,
 )
 
 
@@ -311,6 +312,38 @@ class InnitServer:
                 inputSchema={"type": "object", "properties": {}},
             ),
             Tool(
+                name="vault_tag",
+                description=(
+                    "Tag vault .md files (vault root only, not extra index paths) missing YAML frontmatter. "
+                    "Phase 1: call without apply to preview untagged files grouped by folder. "
+                    "Phase 2: call with apply=true and optional folder_defaults/file_overrides to write frontmatter. "
+                    "Run vault_index after to update the search index."
+                ),
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "vault_path": {
+                            "type": "string",
+                            "description": "Path to vault root (default: VAULT_ROOT env var)",
+                        },
+                        "apply": {
+                            "type": "boolean",
+                            "description": "True to write frontmatter, false for preview (default: false)",
+                        },
+                        "folder_defaults": {
+                            "type": "object",
+                            "description": 'Per-folder default overrides, e.g. {"Projects": {"status": "archived"}}',
+                            "additionalProperties": {"type": "object"},
+                        },
+                        "file_overrides": {
+                            "type": "object",
+                            "description": 'Per-file overrides (relative path), e.g. {"Projects/old.md": {"status": "archived"}}',
+                            "additionalProperties": {"type": "object"},
+                        },
+                    },
+                },
+            ),
+            Tool(
                 name="federated_search",
                 description=(
                     "Search across vault, book library, and session memory simultaneously. "
@@ -476,6 +509,21 @@ class InnitServer:
                         }
                 else:
                     result = {"error": "No embedding store configured"}
+            elif name == "vault_tag":
+                vault_path = arguments.get("vault_path") or self.vault_root
+                if not vault_path:
+                    return [
+                        TextContent(
+                            type="text",
+                            text="Error: vault_path required (set VAULT_ROOT or pass vault_path)",
+                        )
+                    ]
+                result = vault_tag(
+                    vault_path,
+                    apply=arguments.get("apply", False),
+                    folder_defaults=arguments.get("folder_defaults"),
+                    file_overrides=arguments.get("file_overrides"),
+                )
             elif name == "federated_search":
                 result = federated_search(
                     self.db,
