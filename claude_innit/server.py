@@ -518,11 +518,12 @@ class InnitServer:
                             text="Error: vault_path required (set VAULT_ROOT or pass vault_path)",
                         )
                     ]
-                result = vault_tag(
+                result = await asyncio.to_thread(
+                    vault_tag,
                     vault_path,
-                    apply=arguments.get("apply", False),
-                    folder_defaults=arguments.get("folder_defaults"),
-                    file_overrides=arguments.get("file_overrides"),
+                    arguments.get("apply", False),
+                    arguments.get("folder_defaults"),
+                    arguments.get("file_overrides"),
                 )
             elif name == "federated_search":
                 result = federated_search(

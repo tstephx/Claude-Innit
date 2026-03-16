@@ -30,6 +30,27 @@ def has_frontmatter(path: Path) -> bool:
         return True
 
 
+_SKIP_DIRS = frozenset(
+    {
+        "node_modules",
+        ".obsidian",
+        "dist",
+        "build",
+        "site-packages",
+        ".hypothesis",
+        "htmlcov",
+        ".mypy_cache",
+        ".ruff_cache",
+        ".tox",
+        ".eggs",
+        "__pycache__",
+        ".pytest_cache",
+        ".venv",
+        "venv",
+    }
+)
+
+
 def find_untagged(vault_root: Path) -> list[Path]:
     """Find .md files under vault_root that lack frontmatter."""
     untagged = []
@@ -37,7 +58,9 @@ def find_untagged(vault_root: Path) -> list[Path]:
         if not md_file.is_file():
             continue
         parts_lower = [p.lower() for p in md_file.relative_to(vault_root).parts]
-        if any(p.startswith(".") for p in parts_lower):
+        if any(p.startswith(".") or p in _SKIP_DIRS for p in parts_lower):
+            continue
+        if ".egg-info" in str(md_file):
             continue
         if not has_frontmatter(md_file):
             untagged.append(md_file)
@@ -50,6 +73,14 @@ def _get_created_date(path: Path) -> str:
         stat = os.stat(path)
         ts = getattr(stat, "st_birthtime", stat.st_mtime)
         return datetime.fromtimestamp(ts).strftime("%Y-%m-%d")
+    except OSError:
+        return datetime.now().strftime("%Y-%m-%d")
+
+
+def _get_modified_date(path: Path) -> str:
+    """Get file modification date."""
+    try:
+        return datetime.fromtimestamp(path.stat().st_mtime).strftime("%Y-%m-%d")
     except OSError:
         return datetime.now().strftime("%Y-%m-%d")
 
@@ -72,7 +103,7 @@ def build_frontmatter(
         "tags": [],
         "type": FOLDER_TYPE_MAP.get(folder_lower, "note"),
         "created": _get_created_date(path),
-        "modified": datetime.fromtimestamp(path.stat().st_mtime).strftime("%Y-%m-%d"),
+        "modified": _get_modified_date(path),
     }
 
     # Apply folder defaults
