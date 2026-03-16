@@ -54,7 +54,7 @@ def _detect_module(
             rel = Path(file_path).relative_to(ep)
             parts = rel.parts
             if len(parts) < 2:
-                return None
+                continue
             project_dir = parts[0].lower()
             if project_dir in _EXTRA_FRAMEWORK_DIRS:
                 return None
