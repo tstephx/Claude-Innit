@@ -345,6 +345,7 @@ class TestVaultIndexer:
             ".mypy_cache",
             ".ruff_cache",
             ".tox",
+            ".eggs",
         ]:
             d = extra / "proj" / artifact_dir
             d.mkdir(parents=True)
@@ -354,6 +355,18 @@ class TestVaultIndexer:
             assert indexer._should_exclude(d / "README.md"), (
                 f"Expected {artifact_dir}/ to be excluded"
             )
+
+    def test_indexer_excludes_egg_info(self, tmp_path, db):
+        """*.egg-info directories are excluded (substring match, no / prefix)."""
+        vault = tmp_path / "vault"
+        vault.mkdir()
+        extra = tmp_path / "extra"
+        ei = extra / "proj" / "mypkg.egg-info"
+        ei.mkdir(parents=True)
+        (ei / "PKG-INFO").write_text("Metadata\n")
+
+        indexer = VaultIndexer(db, str(vault), extra_paths=[str(extra)])
+        assert indexer._should_exclude(ei / "PKG-INFO")
 
 
 class TestVaultSearch:
