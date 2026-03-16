@@ -384,37 +384,29 @@ class MemoryDatabase:
 
         safe_query = sanitize_fts_query(query)
         try:
+            # Build dynamic WHERE clauses
+            conditions = ["vault_files_fts MATCH ?"]
+            params: list = [safe_query]
             if module:
-                rows = self._conn.execute(
-                    """
-                    SELECT vf.* FROM vault_files vf
-                    JOIN vault_files_fts fts ON vf.file_id = fts.rowid
-                    WHERE vault_files_fts MATCH ?
-                    AND vf.module = ?
-                    ORDER BY rank
-                    LIMIT ?
-                    """,
-                    (safe_query, module, limit),
-                ).fetchall()
-            else:
-                rows = self._conn.execute(
-                    """
-                    SELECT vf.* FROM vault_files vf
-                    JOIN vault_files_fts fts ON vf.file_id = fts.rowid
-                    WHERE vault_files_fts MATCH ?
-                    ORDER BY rank
-                    LIMIT ?
-                    """,
-                    (safe_query, limit),
-                ).fetchall()
-            results = [dict(row) for row in rows]
+                conditions.append("vf.module = ?")
+                params.append(module)
             if status:
-                results = [
-                    r
-                    for r in results
-                    if json.loads(r.get("frontmatter") or "{}").get("status") == status
-                ]
-            return results
+                conditions.append("json_extract(vf.frontmatter, '$.status') = ?")
+                params.append(status)
+            where = " AND ".join(conditions)
+            params.append(limit)
+
+            rows = self._conn.execute(
+                f"""
+                SELECT vf.* FROM vault_files vf
+                JOIN vault_files_fts fts ON vf.file_id = fts.rowid
+                WHERE {where}
+                ORDER BY rank
+                LIMIT ?
+                """,
+                params,
+            ).fetchall()
+            return [dict(row) for row in rows]
         except Exception:
             logger.debug("Vault FTS search error for query %r", query, exc_info=True)
             return []
