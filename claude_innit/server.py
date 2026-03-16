@@ -318,7 +318,7 @@ class InnitServer:
             Tool(
                 name="vault_tag",
                 description=(
-                    "Tag vault .md files (vault root only, not extra index paths) missing YAML frontmatter. "
+                    "Tag .md files missing YAML frontmatter in vault and extra index paths. "
                     "Phase 1: call without apply to preview untagged files grouped by folder. "
                     "Phase 2: call with apply=true and optional folder_defaults/file_overrides to write frontmatter. "
                     "Run vault_index after to update the search index."
@@ -529,6 +529,7 @@ class InnitServer:
                     arguments.get("apply", False),
                     arguments.get("folder_defaults"),
                     arguments.get("file_overrides"),
+                    extra_paths=self.extra_index_paths,
                 )
             elif name == "federated_search":
                 result = federated_search(

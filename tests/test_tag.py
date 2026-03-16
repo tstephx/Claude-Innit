@@ -166,12 +166,13 @@ class TestApplyFrontmatter:
 
 
 class TestVaultTagPreview:
-    def test_preview_returns_grouped_files(self, vault_dir):
+    def test_preview_returns_grouped_by_source(self, vault_dir):
         result = vault_tag(str(vault_dir))
         assert result["mode"] == "preview"
         assert result["total"] == 2
-        assert "Projects" in result["by_folder"]
-        assert "Guides" in result["by_folder"]
+        assert "vault" in result["by_source"]
+        assert "Projects" in result["by_source"]["vault"]
+        assert "Guides" in result["by_source"]["vault"]
 
     def test_preview_no_untagged(self, tmp_path):
         vault = tmp_path / "vault"
@@ -189,7 +190,19 @@ class TestVaultTagPreview:
         result = vault_tag(str(vault))
         assert result["mode"] == "preview"
         assert result["total"] == 0
-        assert result["by_folder"] == {}
+        assert result["by_source"] == {}
+
+    def test_preview_includes_extra_paths(self, tmp_path):
+        vault = tmp_path / "vault"
+        vault.mkdir()
+        extra = tmp_path / "_Lab"
+        proj = extra / "my-project"
+        proj.mkdir(parents=True)
+        (proj / "README.md").write_text("# My Project\n")
+        result = vault_tag(str(vault), extra_paths=[str(extra)])
+        assert result["total"] == 1
+        assert "_Lab" in result["by_source"]
+        assert "my-project" in result["by_source"]["_Lab"]
 
 
 class TestVaultTagApply:
@@ -219,3 +232,16 @@ class TestVaultTagApply:
         )
         content = (vault_dir / "Projects" / "untagged.md").read_text()
         assert "status: draft" in content
+
+    def test_apply_tags_extra_path_files(self, tmp_path):
+        vault = tmp_path / "vault"
+        vault.mkdir()
+        extra = tmp_path / "_Projects"
+        proj = extra / "whatbox" / "docs"
+        proj.mkdir(parents=True)
+        (proj / "setup.md").write_text("# Setup\nInstructions.\n")
+        result = vault_tag(str(vault), apply=True, extra_paths=[str(extra)])
+        assert result["tagged"] == 1
+        content = (proj / "setup.md").read_text()
+        assert content.startswith("---\n")
+        assert "status: active" in content

@@ -51,19 +51,32 @@ _SKIP_DIRS = frozenset(
 )
 
 
-def find_untagged(vault_root: Path) -> list[Path]:
-    """Find .md files under vault_root that lack frontmatter."""
+def _find_untagged_in(root: Path) -> list[Path]:
+    """Find .md files under a single root that lack frontmatter."""
     untagged = []
-    for md_file in sorted(vault_root.rglob("*.md")):
+    for md_file in sorted(root.rglob("*.md")):
         if not md_file.is_file():
             continue
-        parts_lower = [p.lower() for p in md_file.relative_to(vault_root).parts]
+        parts_lower = [p.lower() for p in md_file.relative_to(root).parts]
         if any(p.startswith(".") or p in _SKIP_DIRS for p in parts_lower):
             continue
         if ".egg-info" in str(md_file):
             continue
+        if "/rss-news/" in str(md_file):
+            continue
         if not has_frontmatter(md_file):
             untagged.append(md_file)
+    return untagged
+
+
+def find_untagged(
+    vault_root: Path, extra_paths: Optional[list[Path]] = None
+) -> list[Path]:
+    """Find .md files under vault_root and extra paths that lack frontmatter."""
+    untagged = _find_untagged_in(vault_root)
+    for ep in extra_paths or []:
+        if ep.exists():
+            untagged.extend(_find_untagged_in(ep))
     return untagged
 
 
@@ -85,14 +98,29 @@ def _get_modified_date(path: Path) -> str:
         return datetime.now().strftime("%Y-%m-%d")
 
 
+def _resolve_root(
+    path: Path, vault_root: Path, extra_paths: Optional[list[Path]] = None
+) -> Path:
+    """Find which root directory a file belongs to."""
+    for root in [vault_root] + (extra_paths or []):
+        try:
+            path.relative_to(root)
+            return root
+        except ValueError:
+            continue
+    return vault_root
+
+
 def build_frontmatter(
     path: Path,
     vault_root: Path,
     folder_defaults: Optional[dict] = None,
     file_overrides: Optional[dict] = None,
+    extra_paths: Optional[list[Path]] = None,
 ) -> dict:
     """Build frontmatter dict for a file."""
-    rel = path.relative_to(vault_root)
+    root = _resolve_root(path, vault_root, extra_paths)
+    rel = path.relative_to(root)
     folder = rel.parts[0] if len(rel.parts) > 1 else ""
     rel_str = str(rel)
 
@@ -140,6 +168,7 @@ def vault_tag(
     apply: bool = False,
     folder_defaults: Optional[dict] = None,
     file_overrides: Optional[dict] = None,
+    extra_paths: Optional[list[str]] = None,
 ) -> dict:
     """Two-phase vault tagger.
 
@@ -147,26 +176,35 @@ def vault_tag(
     Phase 2 (apply=True): Applies frontmatter with optional overrides.
     """
     vault_root = Path(vault_path)
-    untagged = find_untagged(vault_root)
+    extra = [Path(p) for p in (extra_paths or [])]
+    all_roots = [vault_root] + extra
+    untagged = find_untagged(vault_root, extra)
 
     if not apply:
-        # Preview phase
-        by_folder = defaultdict(list)
+        # Preview phase — group by root/folder
+        by_source: dict[str, dict[str, list[str]]] = {}
         for f in untagged:
-            rel = f.relative_to(vault_root)
+            root = _resolve_root(f, vault_root, extra)
+            root_label = root.name
+            rel = f.relative_to(root)
             folder = rel.parts[0] if len(rel.parts) > 1 else "(root)"
-            by_folder[folder].append(rel.name)
+            if root_label not in by_source:
+                by_source[root_label] = {}
+            by_source[root_label].setdefault(folder, []).append(rel.name)
 
         return {
             "mode": "preview",
             "total": len(untagged),
-            "by_folder": {k: sorted(v) for k, v in sorted(by_folder.items())},
+            "by_source": {
+                src: {k: sorted(v) for k, v in sorted(folders.items())}
+                for src, folders in sorted(by_source.items())
+            },
         }
 
     # Apply phase
     tagged_count = 0
     for path in untagged:
-        fm = build_frontmatter(path, vault_root, folder_defaults, file_overrides)
+        fm = build_frontmatter(path, vault_root, folder_defaults, file_overrides, extra)
         apply_frontmatter(path, fm)
         tagged_count += 1
 
