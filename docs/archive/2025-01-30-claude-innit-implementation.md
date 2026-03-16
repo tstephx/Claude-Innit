@@ -1,3 +1,11 @@
+---
+status: active
+tags: []
+type: note
+created: '2026-01-30'
+modified: '2026-01-30'
+---
+
 # Claude Innit Implementation Plan
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.

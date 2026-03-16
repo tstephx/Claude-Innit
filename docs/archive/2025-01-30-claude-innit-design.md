@@ -1,3 +1,11 @@
+---
+status: active
+tags: []
+type: note
+created: '2026-01-30'
+modified: '2026-01-30'
+---
+
 # Claude Innit Design
 
 **Status:** Approved

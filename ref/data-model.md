@@ -1,3 +1,11 @@
+---
+status: active
+tags: []
+type: note
+created: '2026-03-12'
+modified: '2026-03-12'
+---
+
 # Data Model Reference
 
 ## Database Schema (`data/innit.db`)

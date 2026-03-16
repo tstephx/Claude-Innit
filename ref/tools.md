@@ -1,3 +1,11 @@
+---
+status: active
+tags: []
+type: note
+created: '2026-03-12'
+modified: '2026-03-12'
+---
+
 # MCP Tools Reference
 
 Claude-Innit exposes 14 tools: 6 memory tools, 6 vault tools, and 2 operator-only admin tools.

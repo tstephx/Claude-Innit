@@ -1,3 +1,11 @@
+---
+status: active
+tags: []
+type: note
+created: '2026-03-11'
+modified: '2026-03-11'
+---
+
 <!-- project: claude-innit -->
 
 # Vault Search Quality: Chunking, Recency Boost, Hybrid Search

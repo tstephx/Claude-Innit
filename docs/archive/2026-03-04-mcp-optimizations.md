@@ -1,3 +1,11 @@
+---
+status: active
+tags: []
+type: note
+created: '2026-03-04'
+modified: '2026-03-04'
+---
+
 # Claude-Innit MCP Optimizations Implementation Plan
 
 <!-- project: claude-innit -->

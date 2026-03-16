@@ -1,3 +1,11 @@
+---
+status: active
+tags: []
+type: note
+created: '2026-03-16'
+modified: '2026-03-16'
+---
+
 # CLAUDE.md — Claude-Innit Memory System
 <!-- project-name: claude-innit -->
 
