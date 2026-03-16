@@ -11,6 +11,8 @@ __pycache__/
 
 # Database
 *.db
+*.db-shm
+*.db-wal
 
 # Memory data (personal context - do not commit)
 data/memories/
@@ -27,6 +29,10 @@ Thumbs.db
 
 # Pytest
 .pytest_cache/
+.hypothesis/
+
+# Test results
+test-results-*.md
 
 # Distribution
 dist/
