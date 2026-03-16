@@ -80,15 +80,25 @@ class VaultIndexer:
         self.vault_root = Path(vault_root)
         self.extra_paths = [Path(p) for p in (extra_paths or [])]
         self.exclude_patterns = exclude_patterns or [
-            "node_modules/",
-            ".git/",
-            ".obsidian/",
+            "/node_modules/",
+            "/.git/",
+            "/.obsidian/",
             ".DS_Store",
-            "__pycache__/",
-            ".pytest_cache/",
-            ".venv/",
-            "venv/",
-            ".brain/tests/",
+            "/__pycache__/",
+            "/.pytest_cache/",
+            "/.venv/",
+            "/venv/",
+            "/site-packages/",
+            "/.hypothesis/",
+            "/htmlcov/",
+            "/dist/",
+            "/build/",
+            "/.mypy_cache/",
+            "/.ruff_cache/",
+            "/.tox/",
+            "/.eggs/",
+            ".egg-info/",
+            "/.brain/tests/",
         ]
 
     def _should_exclude(self, path: Path) -> bool:

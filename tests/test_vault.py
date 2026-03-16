@@ -6,6 +6,7 @@ import pytest
 
 from claude_innit.db.database import MemoryDatabase
 from claude_innit.tools.vault import (
+    VaultIndexer,
     vault_index,
     vault_search,
     vault_related,
@@ -317,6 +318,42 @@ class TestVaultIndexer:
         vault_index(db, vault_root=str(vault_dir))
         # node_modules file should be excluded
         assert db.get_vault_file(str(nm / "README.md")) is None
+
+    def test_indexer_excludes_site_packages(self, tmp_path, db):
+        """site-packages inside any venv variant is excluded."""
+        vault = tmp_path / "vault"
+        vault.mkdir()
+        extra = tmp_path / "extra"
+        sp = extra / "myproject" / "mcpenv" / "lib" / "site-packages" / "requests"
+        sp.mkdir(parents=True)
+        (sp / "README.md").write_text("# Requests library\n")
+
+        indexer = VaultIndexer(db, str(vault), extra_paths=[str(extra)])
+        assert indexer._should_exclude(sp / "README.md")
+
+    def test_indexer_excludes_build_artifacts(self, tmp_path, db):
+        """Common build/cache directories are excluded."""
+        vault = tmp_path / "vault"
+        vault.mkdir()
+        extra = tmp_path / "extra"
+
+        for artifact_dir in [
+            ".hypothesis",
+            "htmlcov",
+            "dist",
+            "build",
+            ".mypy_cache",
+            ".ruff_cache",
+            ".tox",
+        ]:
+            d = extra / "proj" / artifact_dir
+            d.mkdir(parents=True)
+            (d / "README.md").write_text("artifact\n")
+
+            indexer = VaultIndexer(db, str(vault), extra_paths=[str(extra)])
+            assert indexer._should_exclude(d / "README.md"), (
+                f"Expected {artifact_dir}/ to be excluded"
+            )
 
 
 class TestVaultSearch:
