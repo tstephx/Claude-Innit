@@ -1,6 +1,7 @@
 """Vault file indexing, search, and stats for OBF unified search."""
 
 import hashlib
+import json
 import logging
 import time
 from datetime import datetime
@@ -268,13 +269,11 @@ def _filter_by_status(
     db: MemoryDatabase, results: list[dict], status: str
 ) -> list[dict]:
     """Post-filter search results by frontmatter status."""
-    import json as _json
-
     filtered = []
     for r in results:
         vf = db.get_vault_file(r.get("file_path", ""))
         if vf:
-            fm = _json.loads(vf.get("frontmatter") or "{}")
+            fm = json.loads(vf.get("frontmatter") or "{}")
             if fm.get("status") == status:
                 filtered.append(r)
     return filtered
