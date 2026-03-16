@@ -16,7 +16,7 @@ MCP server giving Claude persistent memory across sessions. Three categories (pe
 - `data/memories/` — contains personal context. **Verify this is gitignored before committing.** Add `data/memories/sessions/` to `.gitignore` if not already excluded.
 - For deployed use: store DB + memories outside repo and point server at that location.
 
-## MCP Tools (14)
+## MCP Tools (15)
 
 → Full tool reference: [`ref/tools.md`](ref/tools.md)
 
@@ -36,10 +36,11 @@ MCP server giving Claude persistent memory across sessions. Three categories (pe
 | Tool | Purpose |
 |------|---------|
 | `vault_index` | Index vault .md files, generate chunk embeddings, reload matrix |
-| `vault_search` | Hybrid FTS+semantic search (auto/text/semantic, scope: vault/configs/all) |
+| `vault_search` | Hybrid FTS+semantic search (auto/text/semantic, scope: vault/configs/all, optional status filter) |
 | `vault_related` | Find notes similar to a given note (embeddings or filename fallback) |
 | `vault_stats` | Vault health metrics (by module, status, inbox count, stale count, embedding health) |
 | `vault_rechunk` | Force re-chunk all vault files and regenerate embeddings |
+| `vault_tag` | Two-phase frontmatter tagger: preview untagged files, then apply with folder/file overrides |
 | `federated_search` | Two-level RRF fusion across vault (hybrid), book-library, and session memory |
 
 ## Key Design Decisions
@@ -65,13 +66,16 @@ MCP server giving Claude persistent memory across sessions. Three categories (pe
 - **Orphan cleanup**: `vault_index` auto-cleans orphaned vault/chunk embeddings after each run
 - **Encapsulated search**: `EmbeddingStore.search_chunks()` encapsulates all matrix access — `vault_semantic_search()` is a thin wrapper with scope filter only
 - **FTS sanitization**: `sanitize_fts_query()` in `utils.py` — strips operators, quotes each word. Used by all FTS call sites (memory, vault, federation)
-- **Module detection**: `_detect_module()` in `tools/vault.py` — lowercased top-level folder name, excludes framework dirs (Daily, Inbox, Archive, Claude-Memory)
+- **Module detection**: `_detect_module()` in `tools/vault.py` — vault files use lowercased top-level folder name (no prefix), extra-path files use path-prefixed names (`lab/project-name`, `projects/project-name`). Framework dirs excluded: vault (`daily`, `inbox`, `archive`, `claude-memory`), extra-paths (`ref`, `scripts`, `docs`, `shared`)
+- **Exclusion patterns**: VaultIndexer excludes build artifacts (`node_modules`, `site-packages`, `dist`, `build`, `.hypothesis`, `htmlcov`, `.mypy_cache`, `.ruff_cache`, `.tox`, `.eggs`, `.egg-info`, etc.) with `/` prefix to prevent substring false positives
+- **Status filter**: `vault_search(status="active")` filters at SQL level via `json_extract(frontmatter, '$.status')` — applies to both FTS and semantic legs
+- **Vault tagger**: `vault_tag` tool uses two-phase preview/apply flow, `FOLDER_TYPE_MAP` for type inference, `st_birthtime` for created dates, canonical field ordering in YAML output
 - **Metadata key**: memories use `metadata["project"]` — queries use `json_extract(metadata, '$.project')`
 - **Schema**: 9 tables — `vault_chunks` + `vault_chunk_embeddings` with FK constraints. Legacy `vault_embeddings` deprecated (retained for backward compat)
 
 ## Commands
 ```bash
-.venv/bin/python -m pytest tests/ -v    # all tests (268 total)
+.venv/bin/python -m pytest tests/ -v    # all tests (302 total)
 .venv/bin/python -m claude_innit.server # run MCP server
 pip install -e ".[embeddings,dev]"      # dev install with all deps
 pip install -e .                        # minimal install (no embeddings)
@@ -115,10 +119,11 @@ pip install -e .                        # minimal install (no embeddings)
 ## Key Files
 | File | Purpose |
 |------|---------|
-| `claude_innit/server.py` | MCP server, 14 tools, call_tool dispatch with error boundary |
+| `claude_innit/server.py` | MCP server, 15 tools, call_tool dispatch with error boundary |
 | `claude_innit/db/database.py` | SQLite schema (9 tables), FTS5, WAL, chunk methods, integrity check |
 | `claude_innit/db/embeddings.py` | EmbeddingStore: generate, search_chunks, matrix ops, batch embedding |
-| `claude_innit/tools/vault.py` | VaultIndexer, vault_search (hybrid), vault_related, vault_stats |
+| `claude_innit/tools/vault.py` | VaultIndexer, vault_search (hybrid + status filter), vault_related, vault_stats |
+| `claude_innit/tools/tag.py` | vault_tag: two-phase frontmatter tagger with folder/file overrides |
 | `claude_innit/tools/federation.py` | Two-level RRF fusion across vault, books, sessions, portfolio |
 | `claude_innit/tools/search.py` | Memory search routing (FTS5/semantic) |
 | `claude_innit/tools/memory.py` | remember/forget with markdown file sync |
@@ -139,4 +144,4 @@ pip install -e .                        # minimal install (no embeddings)
 
 ---
 
-*Last updated: 2026-03-12*
+*Last updated: 2026-03-16*
