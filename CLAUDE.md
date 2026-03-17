@@ -1,9 +1,10 @@
 ---
 status: active
-tags: []
+tags: [project/claude-innit, format/readme]
 type: note
 created: '2026-03-16'
 modified: '2026-03-16'
+related: ["[[Claude-Config/mcp-servers/claude-innit]]"]
 ---
 
 # CLAUDE.md — Claude-Innit Memory System

@@ -1,6 +1,6 @@
 ---
 status: active
-tags: []
+tags: [project/claude-innit, format/reference]
 type: note
 created: '2026-03-12'
 modified: '2026-03-12'
