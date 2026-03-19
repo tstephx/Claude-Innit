@@ -219,6 +219,72 @@ _MAX_LIMIT = 100
 _SNIPPET_LEN = 200
 
 
+def _path_priority(file_path: str) -> int:
+    """Return priority for dedup: lower = preferred.
+
+    Vault files (Obsidian-Second-Brain) > _Projects > _Lab > backups.
+    """
+    if "_backups/" in file_path or "/backup" in file_path.lower():
+        return 99
+    if "Obsidian-Second-Brain" in file_path:
+        return 0
+    if "/_Projects/" in file_path:
+        return 1
+    if "/_Lab/" in file_path:
+        return 2
+    return 3
+
+
+def _dedup_results(results: list[dict], db: MemoryDatabase) -> list[dict]:
+    """Remove content-duplicate results, keeping the preferred path.
+
+    Looks up content_hash from the database for each result's file_path.
+    Groups by content_hash, keeps the result with the lowest path priority.
+    """
+    if not results:
+        return results
+
+    # Collect file_paths to look up hashes in batch
+    paths = [r.get("file_path", "") for r in results]
+    hash_map = {}
+    for path in paths:
+        if path and path not in hash_map:
+            vf = db.get_vault_file(path)
+            if vf:
+                hash_map[path] = vf.get("content_hash", "")
+
+    # Group by content_hash, keep best priority
+    seen_hashes: dict[str, dict] = {}  # hash -> best result
+    deduped = []
+    for r in results:
+        path = r.get("file_path", "")
+        h = hash_map.get(path, "")
+        if not h:
+            # No hash available — keep the result
+            deduped.append(r)
+            continue
+        if h in seen_hashes:
+            # Duplicate — keep the one with better priority
+            existing = seen_hashes[h]
+            if _path_priority(path) < _path_priority(existing.get("file_path", "")):
+                # Replace the existing entry
+                seen_hashes[h] = r
+        else:
+            seen_hashes[h] = r
+
+    # Rebuild deduped list preserving original order (by score/rank)
+    hash_winners = set(id(v) for v in seen_hashes.values())
+    for r in results:
+        path = r.get("file_path", "")
+        h = hash_map.get(path, "")
+        if not h:
+            continue
+        if id(r) in hash_winners or (h in seen_hashes and seen_hashes[h] is r):
+            deduped.append(r)
+
+    return deduped
+
+
 def vault_search(
     db: MemoryDatabase,
     query: str,
@@ -245,7 +311,8 @@ def vault_search(
     scope_module = "configs" if scope == "configs" else None
 
     if method == "text" or (method == "auto" and embedding_store is None):
-        return _fts_search(db, query, scope, limit, module_filter, status=status)
+        results = _fts_search(db, query, scope, limit, module_filter, status=status)
+        return _dedup_results(results, db)
 
     elif method == "semantic":
         if embedding_store is None:
@@ -260,7 +327,7 @@ def vault_search(
         )
         if status:
             results = _filter_by_status(db, results, status)
-        return results
+        return _dedup_results(results, db)
 
     elif method == "auto":
         fts_results = _fts_search(db, query, scope, limit, module_filter, status=status)
@@ -272,7 +339,7 @@ def vault_search(
         )
         if status:
             semantic_results = _filter_by_status(db, semantic_results, status)
-        return _hybrid_merge(fts_results, semantic_results, limit)
+        return _dedup_results(_hybrid_merge(fts_results, semantic_results, limit), db)
 
     return []
 

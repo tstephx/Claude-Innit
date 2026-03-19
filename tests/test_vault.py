@@ -838,3 +838,56 @@ class TestVaultSearchEdgeCases:
         assert stats["stale_count"] == 0
         assert stats["index_age_seconds"] == -1.0
         assert stats["last_indexed"] is None
+
+
+class TestVaultSearchDedup:
+    """Content-hash deduplication in vault_search results."""
+
+    def test_dedup_removes_content_duplicates(self, db, vault_dir):
+        """Files with identical content at different paths appear only once."""
+        # Create a duplicate file in a second location
+        dup_dir = vault_dir / "Projects" / "copy"
+        dup_dir.mkdir(parents=True)
+        original = vault_dir / "behavioral-studio" / "Stories" / "API Migration.md"
+        dup = dup_dir / "API Migration.md"
+        dup.write_text(original.read_text())
+
+        vault_index(db, vault_root=str(vault_dir))
+        results = vault_search(db, "API migration", method="text")
+        api_results = [r for r in results if "API Migration" in r.get("filename", "")]
+        assert len(api_results) == 1, (
+            f"Expected 1 result, got {len(api_results)}: {[r['file_path'] for r in api_results]}"
+        )
+
+    def test_dedup_prefers_vault_path(self, db, tmp_path):
+        """When duplicates exist, vault path is preferred over extra paths."""
+        vault = tmp_path / "vault"
+        vault.mkdir()
+        stories = vault / "behavioral-studio" / "Stories"
+        stories.mkdir(parents=True)
+        content = "---\nstatus: active\n---\n\n# Shared Note\nSame content.\n"
+        (stories / "shared.md").write_text(content)
+
+        extra = tmp_path / "extra"
+        extra.mkdir()
+        proj = extra / "my-project"
+        proj.mkdir()
+        (proj / "shared.md").write_text(content)
+
+        vault_index(db, vault_root=str(vault), extra_paths=[str(extra)])
+        results = vault_search(db, "shared content", method="text")
+        shared = [r for r in results if "shared" in r.get("filename", "").lower()]
+        assert len(shared) == 1
+        assert "vault" in shared[0]["file_path"]
+
+    def test_dedup_preserves_distinct_content(self, db, vault_dir):
+        """Files with the same name but different content are not deduped."""
+        dup_dir = vault_dir / "Projects" / "other"
+        dup_dir.mkdir(parents=True)
+        (dup_dir / "API Migration.md").write_text(
+            "---\nstatus: active\n---\n\n# Different API Migration\nCompletely different content.\n"
+        )
+        vault_index(db, vault_root=str(vault_dir))
+        results = vault_search(db, "API migration", method="text")
+        api_results = [r for r in results if "API Migration" in r.get("filename", "")]
+        assert len(api_results) == 2

@@ -97,9 +97,11 @@ def _search_sessions(db: MemoryDatabase, query: str, limit: int = 10) -> list[di
 def _search_vault(
     db: MemoryDatabase, query: str, limit: int = 10, module: Optional[str] = None
 ) -> list[dict]:
-    """Search vault files via vault_files_fts."""
-    results = db.vault_fts_search(query, limit=limit, module=module)
-    return [
+    """Search vault files via vault_files_fts, with content-hash dedup."""
+    from claude_innit.tools.vault import _dedup_results
+
+    raw = db.vault_fts_search(query, limit=limit, module=module)
+    results = [
         {
             "source": "vault",
             "file_path": r["file_path"],
@@ -109,8 +111,9 @@ def _search_vault(
             "snippet": (r.get("content") or "")[:200],
             "score": 1.0 - (i * 0.03),
         }
-        for i, r in enumerate(results)
+        for i, r in enumerate(raw)
     ]
+    return _dedup_results(results, db)
 
 
 def _reciprocal_rank_fusion(
