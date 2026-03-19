@@ -62,6 +62,7 @@ MCP server giving Claude persistent memory across sessions. Three categories (pe
 - **Hybrid search**: `vault_search(method="auto")` runs both FTS5 and semantic, merges via mini-RRF (k=20, FTS=0.4, semantic=0.6). `method="text"` or `method="semantic"` for single-mode
 - **Pre-computed matrix**: `EmbeddingStore.load_matrix()` builds normalized numpy embedding matrix at startup for fast vectorized cosine similarity via `np.dot`. Recency weights pre-applied as numpy array
 - **Query cache**: `@functools.lru_cache(maxsize=64)` on query embeddings — repeated queries skip model inference
+- **Content-hash dedup**: `_dedup_results()` in vault.py — removes duplicate results where the same file is indexed at multiple paths (vault copy + source repo + lab). Prefers vault > _Projects > _Lab > backups. Applied to both `vault_search` and federated `_search_vault`
 - **Two-level RRF**: inner hybrid k=20 for vault search, outer federated k=60 across sources (vault, book-library, sessions)
 - **Eager embedding**: `EmbeddingStore.warm()` pre-loads model at server startup to avoid MCP timeout on first semantic query
 - **Model**: all-MiniLM-L6-v2 (384-dim), `min_similarity=0.35` threshold; numpy/torch are optional deps (`pip install .[embeddings]`)
@@ -84,7 +85,7 @@ MCP server giving Claude persistent memory across sessions. Three categories (pe
 
 ## Commands
 ```bash
-.venv/bin/python -m pytest tests/ -v    # all tests (302 total)
+.venv/bin/python -m pytest tests/ -v    # all tests (307 total)
 .venv/bin/python -m claude_innit.server # run MCP server
 pip install -e ".[embeddings,dev]"      # dev install with all deps
 pip install -e .                        # minimal install (no embeddings)
@@ -153,4 +154,4 @@ pip install -e .                        # minimal install (no embeddings)
 
 ---
 
-*Last updated: 2026-03-16*
+*Last updated: 2026-03-19*
