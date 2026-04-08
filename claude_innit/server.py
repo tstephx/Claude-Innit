@@ -43,6 +43,7 @@ class InnitServer:
         memories_dir: Path,
         vault_root: Optional[str] = None,
         extra_index_paths: Optional[list[str]] = None,
+        exclude_index_patterns: Optional[list[str]] = None,
     ):
         self.server = server
         self.db = db
@@ -50,6 +51,7 @@ class InnitServer:
         self.memories_dir = memories_dir
         self.vault_root = vault_root
         self.extra_index_paths = extra_index_paths or []
+        self.exclude_index_patterns = exclude_index_patterns or []
         self.embedding_store = EmbeddingStore(db)
         # Pre-load embedding model and matrix to avoid timeout on first query
         try:
@@ -450,6 +452,7 @@ class InnitServer:
                                 thread_db,
                                 vault_root=vr,
                                 extra_paths=self.extra_index_paths,
+                                exclude_patterns=self.exclude_index_patterns or None,
                                 force=arguments.get("force", False),
                             )
                             cleaned = thread_db.cleanup_orphan_vault_embeddings()
@@ -555,6 +558,7 @@ def create_server(
     memories_dir: Path,
     vault_root: Optional[str] = None,
     extra_index_paths: Optional[list[str]] = None,
+    exclude_index_patterns: Optional[list[str]] = None,
 ) -> InnitServer:
     """Create and configure the MCP server."""
     server = Server("claude-innit")
@@ -572,6 +576,7 @@ def create_server(
         memories_dir,
         vault_root=vault_root,
         extra_index_paths=extra_index_paths,
+        exclude_index_patterns=exclude_index_patterns,
     )
 
     # Register handlers
@@ -616,11 +621,19 @@ async def main():
         ]
     )
 
+    # Paths to exclude from indexing (colon-separated patterns)
+    exclude_index_patterns = (
+        os.environ.get("EXCLUDE_INDEX_PATTERNS", "").split(":")
+        if os.environ.get("EXCLUDE_INDEX_PATTERNS")
+        else ["/rss-news/", "/vault-rss-feeds/"]
+    )
+
     innit_server = create_server(
         db_path,
         memories_dir,
         vault_root=vault_root,
         extra_index_paths=extra_index_paths,
+        exclude_index_patterns=exclude_index_patterns,
     )
 
     async with stdio_server() as (read_stream, write_stream):

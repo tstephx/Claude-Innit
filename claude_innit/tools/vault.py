@@ -101,6 +101,7 @@ class VaultIndexer:
             ".egg-info/",
             "/.brain/tests/",
             "/rss-news/",
+            "/_backups/",
         ]
 
     def _should_exclude(self, path: Path) -> bool:
