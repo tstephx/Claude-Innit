@@ -44,6 +44,15 @@ PROJECT_CARD_MAP = {
     "website-portfolio": "Projects/server (category)/website-portfolio/_PROJECT_CARD",
     "whatbox": "Projects/server (category)/whatbox/_PROJECT_CARD",
     "whatbox-portfolio-mcp": "Projects/mcp (category)/whatbox-portfolio-mcp/_PROJECT_CARD",
+    # Projects with flat-path aliases
+    "_lab": "Projects/lab-docs/_PROJECT_CARD",
+    "obsidian-brain": "Projects/obsidian-brain-framework/_PROJECT_CARD",
+    "obsidian-second-brain": "Projects/obsidian-brain-framework/_PROJECT_CARD",
+    "dotfiles": "Projects/dotfiles/_PROJECT_CARD",
+    "action-tracker": "Projects/action-tracker/_PROJECT_CARD",
+    "claude-projects": "Projects/claude-projects/_PROJECT_CARD",
+    "rss-news-server": "Projects/server (category)/whatbox/rss-news-server/_PROJECT_CARD",
+    "morning-reader": "Projects/server (category)/whatbox/morning-reader/_PROJECT_CARD",
 }
 
 # ── Frontmatter parsing ────────────────────────────────────────────────────────
