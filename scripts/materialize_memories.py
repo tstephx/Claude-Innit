@@ -37,12 +37,12 @@ PROJECT_CARD_MAP = {
     "fast-mail": "Projects/mcp (category)/fast-mail/_PROJECT_CARD",
     "my-mcp-portfolio": "Projects/mcp (category)/my-mcp-portfolio/_PROJECT_CARD",
     "obsidian-second-brain": "Projects/obsidian-brain-framework/_PROJECT_CARD",
-    "periodical-parser": "Projects/server (category)/periodical-parser/_PROJECT_CARD",
+    "periodical-parser": "Projects/whatbox-server/periodical-parser/_PROJECT_CARD",
     "virtual-career-coach": "Projects/mcp (category)/career-coach-mcp/_PROJECT_CARD",
-    "website-portfolio": "Projects/server (category)/website-portfolio/_PROJECT_CARD",
-    "whatbox": "Projects/server (category)/whatbox/_PROJECT_CARD",
+    "website-portfolio": "Projects/whatbox-server/website-portfolio/_PROJECT_CARD",
+    "whatbox": "Projects/whatbox-server/whatbox/_PROJECT_CARD",
     "whatbox-portfolio-mcp": "Projects/mcp (category)/whatbox-portfolio-mcp/_PROJECT_CARD",
-    "write-pipeline": "Projects/server (category)/whatbox/morning-reader/_PROJECT_CARD",
+    "write-pipeline": "Projects/whatbox-server/whatbox/morning-reader/_PROJECT_CARD",
     # Projects with flat-path aliases
     "_lab": "Projects/lab-docs/_PROJECT_CARD",
     "obsidian-brain": "Projects/obsidian-brain-framework/_PROJECT_CARD",
@@ -50,8 +50,8 @@ PROJECT_CARD_MAP = {
     "dotfiles": "Projects/dotfiles/_PROJECT_CARD",
     "action-tracker": "Projects/action-tracker/_PROJECT_CARD",
     "claude-projects": "Projects/claude-projects/_PROJECT_CARD",
-    "rss-news-server": "Projects/server (category)/whatbox/rss-news-server/_PROJECT_CARD",
-    "morning-reader": "Projects/server (category)/whatbox/morning-reader/_PROJECT_CARD",
+    "rss-news-server": "Projects/whatbox-server/whatbox/rss-news-server/_PROJECT_CARD",
+    "morning-reader": "Projects/whatbox-server/whatbox/morning-reader/_PROJECT_CARD",
 }
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
