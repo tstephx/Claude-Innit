@@ -172,21 +172,33 @@ class MemoryDatabase:
         source_file: Optional[str] = None,
         metadata: Optional[dict] = None,
     ) -> None:
-        """Insert or update a memory."""
-        self._conn.execute(
-            """
-            INSERT OR REPLACE INTO memories (id, category, source_file, content, metadata, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?)
-            """,
-            (
-                id,
-                category,
-                source_file,
-                content,
-                json.dumps(metadata or {}),
-                datetime.now().isoformat(),
-            ),
-        )
+        """Insert or update a memory.
+
+        Uses explicit UPDATE/INSERT instead of INSERT OR REPLACE to preserve the
+        row's rowid across updates. INSERT OR REPLACE deletes + re-inserts the row
+        with a new rowid, which causes the FTS5 external content table to accumulate
+        phantom docsize entries for stale rowids — eventually triggering
+        "missing row N from content table" errors that silently return empty results.
+        """
+        existing = self._conn.execute(
+            "SELECT id FROM memories WHERE id = ?", (id,)
+        ).fetchone()
+        metadata_json = json.dumps(metadata or {})
+        now = datetime.now().isoformat()
+        if existing:
+            self._conn.execute(
+                """UPDATE memories SET
+                       category = ?, source_file = ?, content = ?,
+                       metadata = ?, updated_at = ?
+                   WHERE id = ?""",
+                (category, source_file, content, metadata_json, now, id),
+            )
+        else:
+            self._conn.execute(
+                """INSERT INTO memories (id, category, source_file, content, metadata, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (id, category, source_file, content, metadata_json, now),
+            )
         self._conn.commit()
 
     def get_memory(self, id: str) -> Optional[dict]:
