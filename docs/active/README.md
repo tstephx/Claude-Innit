@@ -14,15 +14,11 @@ Open items only. Per `CLAUDE.md`, files here older than 14 days are considered s
 
 ---
 
-## In Progress (uncommitted working-tree changes)
+## In Progress
 
-As of this writing, `git status` on `main` shows uncommitted changes not yet folded into any plan doc:
+*(nothing currently in progress)*
 
-- **Shared `materialize_common.py` extraction** — `scripts/materialize_memories.py` and `scripts/materialize_sessions.py` both duplicated `PROJECT_CARD_MAP`, `slugify()`, and `parse_frontmatter()`. A new `scripts/materialize_common.py` centralizes these; both scripts now import from it instead of duplicating ~100 lines each. Untracked file: `scripts/materialize_common.py`. Modified: `scripts/materialize_memories.py`, `scripts/materialize_sessions.py`.
-- **`insert_memory()` rowid-stability fix** — `claude_innit/db/database.py` changes `insert_memory()` from `INSERT OR REPLACE` to an explicit `UPDATE`-if-exists-else-`INSERT`. `INSERT OR REPLACE` deletes and re-inserts the row with a new rowid, which leaves the FTS5 external-content table accumulating phantom `docsize` entries for stale rowids — eventually surfacing as "missing row N from content table" errors that silently return empty search results. The fix (documented in the method's own docstring) preserves rowid across updates.
-- **`.gitignore` update** accompanies the above (untracked `scripts/materialize_common.py` addition).
-
-None of this is committed yet — no commit message, no test run confirmed in this session. Next step: verify the FTS5 rowid fix against the existing `data/innit.db` (or a fresh one) and land both changes as separate commits per `CLAUDE.md`'s "smallest surface area" change protocol.
+Recently landed (2026-07-16, previously sat uncommitted in the working tree): the `insert_memory()` FTS5 rowid-stability fix (`fa4b4be`), the `materialize_common.py` extraction (`fdf9ac5`), and the MemPalace `.gitignore` entries (`84392e1`). Test suite verified before landing: 274 passed; the 7 `test_embeddings.py` failures are environmental (missing ML deps) and identical at the prior HEAD.
 
 ## GitHub Issues
 
