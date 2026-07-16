@@ -156,7 +156,11 @@ Both scripts maintain `PROJECT_CARD_MAP` mapping project slugs → vault `_PROJE
 - ADRs: `docs/decisions/` — permanent decision log, numbered ADR-NNN
 - Active work: `docs/active/` — open items only; files >14 days old are stale, flag them
 - Archive: `docs/archive/` — executed plans, read-only reference
-- Plans: `docs/plans/` — staging area; move to `docs/archive/` when done
+- Plans: `docs/plans/` — legacy staging area, gitignored; do not add new plans here
+
+## Documentation System
+
+`docs/decisions/` is the permanent, append-only decision log — each ADR (`ADR-NNN-slug.md`) records one architectural choice, why it was made, and what was rejected; when a decision changes, a new ADR supersedes the old one rather than editing it in place. `docs/active/` tracks genuinely open work only — in-progress code, open GitHub issues, unexecuted plans — and is subject to the >14-day staleness check (flag anything older for resolution or archival). `docs/archive/` holds executed, read-only implementation plans kept for historical reference. `docs/plans/` is legacy: it predates the decisions/active/archive split, is now gitignored, and should not receive new content — plans that get executed today move straight to `docs/archive/` when done.
 
 ## Git
 - Branch: `main` — Style: `feat:`, `fix:`, `test:`, `refactor:`
@@ -164,4 +168,4 @@ Both scripts maintain `PROJECT_CARD_MAP` mapping project slugs → vault `_PROJE
 
 ---
 
-*Last updated: 2026-04-08*
+*Last updated: 2026-07-16*
