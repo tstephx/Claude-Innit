@@ -18,6 +18,7 @@ from materialize_common import (
     INNIT_BASE,
     VAULT_MEMORY,
     parse_frontmatter,
+    resolve_card_path,
     slugify,
     strip_frontmatter_body,
 )

@@ -17,6 +17,7 @@ from materialize_common import (
     INNIT_BASE,
     VAULT_SESSIONS,
     parse_frontmatter,
+    resolve_card_path,
 )
 
 INNIT_SESSIONS = INNIT_BASE / "sessions"
