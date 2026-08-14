@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "Claude's persistent memory context system"
 requires-python = ">=3.11"
 dependencies = [
-      "mcp>=1.0.0",
+      "mcp>=1.0.0,<2.0",
       "pyyaml>=6.0",
   ]
                                                                                                                                                                            
