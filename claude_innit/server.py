@@ -8,26 +8,33 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-from mcp.server import Server
+from mcp.server import Server, ServerRequestContext
 from mcp.server.stdio import stdio_server
-from mcp.types import Tool, TextContent
+from mcp.types import (
+    CallToolRequestParams,
+    CallToolResult,
+    ListToolsResult,
+    PaginatedRequestParams,
+    TextContent,
+    Tool,
+)
 
 from claude_innit.db.database import MemoryDatabase
 from claude_innit.db.embeddings import EmbeddingStore
 from claude_innit.sync.markdown_sync import MarkdownSync
 from claude_innit.tools import (
-    get_context,
-    search,
-    remember,
-    forget,
-    save_session,
     check_integrity,
-    list_memories,
-    vault_index,
-    vault_search,
-    vault_related,
-    vault_stats,
     federated_search,
+    forget,
+    get_context,
+    list_memories,
+    remember,
+    save_session,
+    search,
+    vault_index,
+    vault_related,
+    vault_search,
+    vault_stats,
     vault_tag,
 )
 
@@ -37,13 +44,13 @@ class InnitServer:
 
     def __init__(
         self,
-        server: Server,
+        server: Server | None,
         db: MemoryDatabase,
         sync: MarkdownSync,
         memories_dir: Path,
-        vault_root: Optional[str] = None,
-        extra_index_paths: Optional[list[str]] = None,
-        exclude_index_patterns: Optional[list[str]] = None,
+        vault_root: str | None = None,
+        extra_index_paths: list[str] | None = None,
+        exclude_index_patterns: list[str] | None = None,
     ):
         self.server = server
         self.db = db
@@ -71,7 +78,7 @@ class InnitServer:
                     "Call this once at the start of every session before doing any other work. "
                     "Pass the project name to filter to relevant project and session memories."
                 ),
-                inputSchema={
+                input_schema={
                     "type": "object",
                     "properties": {
                         "project": {
@@ -88,7 +95,7 @@ class InnitServer:
                     "Call this when you need information from past sessions that is not in the current get_context result. "
                     "Short keywords (1-3 words) use exact text match. Longer phrases use semantic/concept search."
                 ),
-                inputSchema={
+                input_schema={
                     "type": "object",
                     "properties": {
                         "query": {
@@ -111,7 +118,7 @@ class InnitServer:
                     "Use for facts, decisions, preferences, or project state that should be recalled in future sessions. "
                     "Choose category: 'personal' for user preferences/identity, 'project' for per-project state, 'session' for session summaries."
                 ),
-                inputSchema={
+                input_schema={
                     "type": "object",
                     "properties": {
                         "content": {
@@ -138,7 +145,7 @@ class InnitServer:
                     "Requires the memory_id — use list_memories first to discover IDs. "
                     "Use when an improvement has been implemented, a fact is no longer true, or a memory is outdated."
                 ),
-                inputSchema={
+                input_schema={
                     "type": "object",
                     "properties": {
                         "memory_id": {
@@ -156,7 +163,7 @@ class InnitServer:
                     "Call once at the end of a working session — not after each sub-task. "
                     "Include what was completed, what to do next, and any key decisions made."
                 ),
-                inputSchema={
+                input_schema={
                     "type": "object",
                     "properties": {
                         "summary": {
@@ -183,7 +190,7 @@ class InnitServer:
                     "Call this to discover memory IDs before using forget(), or to audit what is stored. "
                     "Filter by category ('personal', 'project', 'session') or project name."
                 ),
-                inputSchema={
+                input_schema={
                     "type": "object",
                     "properties": {
                         "category": {
@@ -204,7 +211,7 @@ class InnitServer:
                     "Operator tool: Re-sync markdown files to database. "
                     "Not needed in normal sessions — only call if memories are out of sync after manual file edits."
                 ),
-                inputSchema={"type": "object", "properties": {}},
+                input_schema={"type": "object", "properties": {}},
             ),
             Tool(
                 name="admin_check_integrity",
@@ -213,7 +220,7 @@ class InnitServer:
                     "Not needed in normal sessions — only call when experiencing search or sync failures. "
                     "Checks FTS index sync, orphaned embeddings, and SQLite integrity."
                 ),
-                inputSchema={
+                input_schema={
                     "type": "object",
                     "properties": {
                         "auto_repair": {
@@ -231,7 +238,7 @@ class InnitServer:
                     "Call this to update the vault search index after file changes. "
                     "Skips unchanged files by default (hash-based). Use force=true to reindex everything."
                 ),
-                inputSchema={
+                input_schema={
                     "type": "object",
                     "properties": {
                         "vault_root": {
@@ -251,7 +258,7 @@ class InnitServer:
                     "Search vault files by keyword or concept. "
                     "Use scope to narrow: 'vault' for vault notes, 'configs' for framework config files, 'all' for everything."
                 ),
-                inputSchema={
+                input_schema={
                     "type": "object",
                     "properties": {
                         "query": {
@@ -286,7 +293,7 @@ class InnitServer:
                     "Find notes related to a given note. "
                     "Uses semantic similarity if embeddings exist, otherwise falls back to filename-based FTS."
                 ),
-                inputSchema={
+                input_schema={
                     "type": "object",
                     "properties": {
                         "note_path": {
@@ -307,7 +314,7 @@ class InnitServer:
                     "Return vault health metrics: total notes, notes by module, notes by status, "
                     "inbox count, stale count, and index freshness."
                 ),
-                inputSchema={"type": "object", "properties": {}},
+                input_schema={"type": "object", "properties": {}},
             ),
             Tool(
                 name="vault_rechunk",
@@ -315,7 +322,7 @@ class InnitServer:
                     "Force re-chunk and re-embed all vault files. "
                     "Use when chunking parameters change or chunks seem stale."
                 ),
-                inputSchema={"type": "object", "properties": {}},
+                input_schema={"type": "object", "properties": {}},
             ),
             Tool(
                 name="vault_tag",
@@ -325,7 +332,7 @@ class InnitServer:
                     "Phase 2: call with apply=true and optional folder_defaults/file_overrides to write frontmatter. "
                     "Run vault_index after to update the search index."
                 ),
-                inputSchema={
+                input_schema={
                     "type": "object",
                     "properties": {
                         "vault_path": {
@@ -357,7 +364,7 @@ class InnitServer:
                     "Sources: vault (indexed vault files), books (book-library chapters), "
                     "sessions (claude-innit memories), portfolio (materialized portfolio docs)."
                 ),
-                inputSchema={
+                input_schema={
                     "type": "object",
                     "properties": {
                         "query": {
@@ -556,21 +563,26 @@ class InnitServer:
 def create_server(
     db_path: Path,
     memories_dir: Path,
-    vault_root: Optional[str] = None,
-    extra_index_paths: Optional[list[str]] = None,
-    exclude_index_patterns: Optional[list[str]] = None,
+    vault_root: str | None = None,
+    extra_index_paths: list[str] | None = None,
+    exclude_index_patterns: list[str] | None = None,
 ) -> InnitServer:
     """Create and configure the MCP server."""
-    server = Server("claude-innit")
-
     # Initialize database
     db = MemoryDatabase(db_path)
     sync = MarkdownSync(db_path, memories_dir, generate_embeddings=False)
     # Sync is deferred to main() background task — do not block here
 
-    # Create wrapper
+    # Create wrapper first, server wired in below. mcp 2.0's Server takes its
+    # tool-registration callbacks as constructor kwargs (on_list_tools/
+    # on_call_tool) rather than post-construction decorators, so the
+    # callbacks — which close over innit_server — must be defined before
+    # Server() exists. innit_server itself only needs the real Server for
+    # its .name/.run()/.create_initialization_options() proxy (see the
+    # `name` property and main()), not during __init__, so the two-phase
+    # construction below is safe.
     innit_server = InnitServer(
-        server,
+        None,
         db,
         sync,
         memories_dir,
@@ -579,14 +591,20 @@ def create_server(
         exclude_index_patterns=exclude_index_patterns,
     )
 
-    # Register handlers
-    @server.list_tools()
-    async def list_tools() -> list[Tool]:
-        return innit_server.list_tools()
+    async def list_tools(
+        ctx: ServerRequestContext, params: PaginatedRequestParams | None
+    ) -> ListToolsResult:
+        return ListToolsResult(tools=innit_server.list_tools())
 
-    @server.call_tool()
-    async def call_tool(name: str, arguments: dict) -> list[TextContent]:
-        return await innit_server.call_tool(name, arguments)
+    async def call_tool(
+        ctx: ServerRequestContext, params: CallToolRequestParams
+    ) -> CallToolResult:
+        content = await innit_server.call_tool(params.name, params.arguments or {})
+        return CallToolResult(content=content)
+
+    innit_server.server = Server(
+        "claude-innit", on_list_tools=list_tools, on_call_tool=call_tool
+    )
 
     return innit_server
 
