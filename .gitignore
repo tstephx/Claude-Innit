@@ -14,6 +14,9 @@ __pycache__/
 *.db-shm
 *.db-wal
 
+# Backup job logs (project-local, not tracked)
+logs/
+
 # Memory data (personal context - do not commit)
 data/memories/
 
