@@ -1,0 +1,27 @@
+contract_version: "1"
+objective: >
+  Review the onboarding artifacts just added to claude-innit
+  (.claude/ai-adoption.yaml, .claude/rules/ai-adoption.md, scripts/ai-verify.sh,
+  and the .gitignore addition) for correctness and consistency with the repo's
+  existing conventions, as the bounded real task exercising /repo-context per
+  the Wave A Step 1 onboarding pilot's Step 8 verification sequence.
+acceptance_criteria:
+  - ".claude/ai-adoption.yaml declares profile mcp-server, commands.verify scripts/ai-verify.sh, commands.audit null"
+  - "scripts/ai-verify.sh is executable and correctly wraps make test"
+  - ".gitignore change adds only the .claude-handoff.local.md line, without altering or removing unrelated entries"
+  - "No repository file outside the onboarding artifacts was modified"
+non_goals:
+  - "Fixing the venv/Makefile uv-vs-pip mismatch beyond what's already resolved"
+  - "Changing any other registered consumer or _Workspace registry/policy files"
+allowed_reads:
+  - ".claude/ai-adoption.yaml"
+  - ".claude/rules/ai-adoption.md"
+  - "scripts/ai-verify.sh"
+  - ".gitignore"
+  - "Makefile"
+  - "CLAUDE.md"
+allowed_writes: []
+prohibited_actions:
+  - "Any git commit or push"
+  - "Any edit outside allowed_reads"
+  - "Any change to venv contents or dependencies"

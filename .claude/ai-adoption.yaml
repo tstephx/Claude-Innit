@@ -1,0 +1,4 @@
+profile: mcp-server
+commands:
+  verify: scripts/ai-verify.sh
+  audit: null

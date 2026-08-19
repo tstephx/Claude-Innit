@@ -48,3 +48,4 @@ docs/plans/
 mempalace.yaml
 entities.json
 .claude/.session-receipt.local.json
+.claude-handoff.local.md
