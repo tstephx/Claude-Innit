@@ -42,8 +42,9 @@ dist/
 build/
 *.egg-info/
 docs/plans/
-.claude/
+.claude/settings.local.json
 
 # MemPalace per-project files (issue #185)
 mempalace.yaml
 entities.json
+.claude/.session-receipt.local.json
