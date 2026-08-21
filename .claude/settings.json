@@ -2,13 +2,5 @@
   "enabledPlugins": {
     "commands-database-operations@buildwithclaude": true,
     "taylor-dev-core@taylor-dev": true
-  },
-  "extraKnownMarketplaces": {
-    "taylor-dev": {
-      "source": {
-        "source": "directory",
-        "path": "/Users/taylorstephens/Dev/_Workspace/.harness-releases/taylor-dev-core/0.5.0-c1fd48bc04b6"
-      }
-    }
   }
 }

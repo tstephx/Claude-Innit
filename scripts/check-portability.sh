@@ -9,15 +9,7 @@ cd "$(git rev-parse --show-toplevel)"
 
 # Path prefixes retained by explicit audit decision — do not add an entry
 # here without recording the decision in the portability audit ledger.
-#
-# - taylor-dev-core marketplace materialization path: actively managed by an
-#   external fleet-wide promotion process outside this repository;
-#   extraKnownMarketplaces "directory" sources are inherently machine-local
-#   per Claude Code's own semantics, and the plugin is optional (repository
-#   loading works without it).
-ALLOWLIST=(
-    '/Users/taylorstephens/Dev/_Workspace/.harness-releases/taylor-dev-core/'
-)
+ALLOWLIST=()
 
 failures=0
 while IFS= read -r hit; do

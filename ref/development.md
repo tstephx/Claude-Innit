@@ -55,14 +55,14 @@ pip install -e ".[embeddings,dev]"      # + pytest, pytest-asyncio
 .venv/bin/python -m claude_innit.server           # stdio MCP server
 ```
 
-Register in `~/.claude/mcp_servers.json`:
+Register as an MCP server in the consuming project's `.mcp.json`, under `mcpServers` (see root `README.md` § Usage):
 
 ```json
 {
-  "claude-innit": {
-    "command": "python",
-    "args": ["-m", "claude_innit.server"],
-    "cwd": "/path/to/Claude-Innit"
+  "mcpServers": {
+    "claude-innit": {
+      "command": "claude-innit"
+    }
   }
 }
 ```
