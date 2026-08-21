@@ -8,7 +8,7 @@ modified: '2026-03-12'
 
 # MCP Tools Reference
 
-Claude-Innit exposes 14 tools: 6 memory tools, 6 vault tools, and 2 operator-only admin tools.
+Claude-Innit exposes 15 tools: 6 memory tools, 7 vault tools, and 2 operator-only admin tools.
 
 ---
 
@@ -208,6 +208,30 @@ Force re-chunk all vault files and regenerate embeddings.
 - Generates new embeddings for each chunk
 - Reloads the embedding matrix
 - Returns: `{ "files_processed": N, "chunks_created": N, "embeddings_generated": N, "errors": N }`
+
+---
+
+### `vault_tag`
+
+Two-phase frontmatter tagger: preview untagged files, then apply with folder/file overrides.
+
+```json
+{ "vault_path": "/path/to/vault", "apply": false }
+```
+
+```json
+{
+  "vault_path": "/path/to/vault",
+  "apply": true,
+  "folder_defaults": {"Notes": {"status": "active"}},
+  "file_overrides": {"Notes/foo.md": {"status": "draft"}}
+}
+```
+
+- `apply: false` (default) — returns a preview of untagged files grouped by source root and folder, with a total count
+- `apply: true` — writes frontmatter to each untagged file using `folder_defaults` and `file_overrides`, then returns `{ "mode": "applied", "tagged": N, "message": "..." }`
+- `file_overrides` keys are paths relative to `vault_path`
+- Does not re-index — run `vault_index` afterward to update the search DB
 
 ---
 

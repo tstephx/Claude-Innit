@@ -1,0 +1,12 @@
+name: Portability check
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  portability:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: bash scripts/check-portability.sh

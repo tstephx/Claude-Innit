@@ -25,14 +25,16 @@ pip install -e .
 
 ## Usage
 
-Add to `~/.claude/mcp_servers.json`:
+Register as an MCP server in the consuming project's `.mcp.json`, under `mcpServers`:
 
 ```json
 {
-  "claude-innit": {
-    "command": "python",
-    "args": ["-m", "claude_innit.server"],
-    "cwd": "/path/to/Claude-Innit"
+  "mcpServers": {
+    "claude-innit": {
+      "command": "claude-innit"
+    }
   }
 }
 ```
+
+This relies on the `claude-innit` console script installed above being on `PATH` in the environment Claude Code launches servers from (an activated venv, or a global/pipx install).

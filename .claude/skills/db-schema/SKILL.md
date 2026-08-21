@@ -23,7 +23,7 @@ book-mcp-server#8.)
 
 To verify a specific column actually exists:
 
-    sqlite3 data/innit.db "PRAGMA table_info(vault_chunks)"
+    sqlite3 "${CLAUDE_PROJECT_DIR}/data/innit.db" "PRAGMA table_info(vault_chunks)"
 
 ## Known traps
 

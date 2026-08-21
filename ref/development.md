@@ -115,10 +115,7 @@ Register in `~/.claude/mcp_servers.json`:
 
 ## Change Protocol
 
-1. `pytest tests/ -v` (baseline — expect 202 pass)
-2. Smallest surface area possible
-3. `pytest tests/ -v` (after)
-4. If schema or markdown format changed: call `admin_sync` and validate
+See root `CLAUDE.md` § Change Protocol — applies repo-wide, not repeated here.
 
 ---
 
@@ -126,7 +123,7 @@ Register in `~/.claude/mcp_servers.json`:
 
 | File | Purpose |
 |------|---------|
-| `claude_innit/server.py` | MCP server, tool registration (14 tools), call_tool dispatch |
+| `claude_innit/server.py` | MCP server, tool registration (15 tools), call_tool dispatch |
 | `claude_innit/db/database.py` | SQLite schema (9 tables), FTS5, WAL config, chunk methods |
 | `claude_innit/db/embeddings.py` | EmbeddingStore: generate, search_chunks, matrix ops, batch embedding |
 | `claude_innit/utils.py` | parse_frontmatter, sanitize_fts_query |
@@ -135,7 +132,8 @@ Register in `~/.claude/mcp_servers.json`:
 | `claude_innit/tools/memory.py` | `remember()`, `forget()` |
 | `claude_innit/tools/context.py` | `get_context()` |
 | `claude_innit/tools/search.py` | `search()` routing (FTS5/semantic) |
-| `claude_innit/tools/vault.py` | VaultIndexer, vault_search, vault_semantic_search, vault_related, vault_stats |
+| `claude_innit/tools/vault.py` | VaultIndexer, vault_search, vault_semantic_search, vault_related, vault_stats, vault_rechunk |
+| `claude_innit/tools/tag.py` | `vault_tag` — two-phase preview/apply frontmatter tagger |
 | `claude_innit/tools/federation.py` | Federated search, RRF fusion across sources |
 | `claude_innit/tools/list.py` | `list_memories()` |
 | `claude_innit/tools/session.py` | `save_session()` |

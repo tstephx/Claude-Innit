@@ -31,6 +31,8 @@ CREATE TABLE memories (
 - `project`: `{"name": "project-name"}` — used for filtering in `get_context` and `list_memories`
 - `session`: `{"project": "project-name", "topics": [...], "date": "YYYY-MM-DD"}`
 
+Query convention: project-scoped lookups filter via `json_extract(metadata, '$.project')`.
+
 #### `memories_fts` (FTS5)
 
 Content-shadowed FTS5 index over `memories`. Kept in sync via triggers:
@@ -81,6 +83,8 @@ CREATE VIRTUAL TABLE vault_files_fts USING fts5(
 ```
 
 Kept in sync via triggers: `vault_files_ai`, `vault_files_ad`, `vault_files_au`.
+
+`vault_search(status="active")` filters at the SQL level via `json_extract(frontmatter, '$.status')` — applied to both the FTS and semantic legs.
 
 #### `vault_chunks`
 

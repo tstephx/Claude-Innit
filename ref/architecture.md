@@ -15,7 +15,7 @@ MCP Client (Claude)
        │ stdio / JSON-RPC
        ▼
 InnitServer (server.py)
-  ├── list_tools()       → 14 tools
+  ├── list_tools()       → 15 tools
   └── call_tool()        ← error boundary wraps all dispatches
        │
        ├── tools/context.py     get_context
@@ -24,7 +24,8 @@ InnitServer (server.py)
        ├── tools/session.py     save_session
        ├── tools/list.py        list_memories
        ├── tools/maintenance.py admin_sync, admin_check_integrity
-       ├── tools/vault.py       vault_index, vault_search, vault_related, vault_stats
+       ├── tools/vault.py       vault_index, vault_search, vault_related, vault_stats, vault_rechunk
+       ├── tools/tag.py         vault_tag
        └── tools/federation.py  federated_search
             │
             ├── db/database.py       MemoryDatabase (SQLite/FTS5, WAL mode)
@@ -112,6 +113,26 @@ Chunks are stored in `vault_chunks` table with FK to `vault_files`. Each chunk g
 ### Error boundary
 
 `call_tool` wraps all dispatch in `try/except Exception`, returning `{"error": "ExceptionType", "message": "...", "tool": "..."}` instead of propagating. No single tool failure can crash the server.
+
+### Content-hash dedup
+
+`_dedup_results()` in `tools/vault.py` removes duplicate results where the same file is indexed at multiple paths (vault copy + source repo + lab). Prefers vault > `_Projects` > `_Lab` > backups. Applied to both `vault_search` and federated `_search_vault`.
+
+### Fail-loud semantic search
+
+`vault_search(method="semantic")` raises `ValueError` when no embedding store is configured, instead of silently returning empty results — forces the caller to notice the missing dependency rather than misreading an empty result as "no matches."
+
+### Orphan cleanup
+
+`vault_index` auto-cleans orphaned vault/chunk embeddings (rows with no matching `vault_files`/`vault_chunks` row) after each indexing run.
+
+### Vault tagger
+
+`vault_tag` (`tools/tag.py`) is a two-phase preview/apply tool: `apply=False` returns a preview of untagged files grouped by folder; `apply=True` applies frontmatter using `folder_defaults`/`file_overrides`, with `st_birthtime` for created dates and canonical field ordering in the written YAML.
+
+### Indexer exclusions
+
+`VaultIndexer` excludes build-artifact directories (`node_modules`, `site-packages`, `dist`, `build`, `.hypothesis`, `htmlcov`, `.mypy_cache`, `.ruff_cache`, `.tox`, `.eggs`, `.egg-info`, etc.) via `/`-prefixed patterns, to prevent substring false positives against real content directories.
 
 ---
 
