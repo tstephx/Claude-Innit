@@ -49,3 +49,7 @@ mempalace.yaml
 entities.json
 .claude/.session-receipt.local.json
 .claude-handoff.local.md
+
+# Local mirrors of GitHub issues/PRs — GitHub is the source of truth.
+github-issues/
+github-prs/
