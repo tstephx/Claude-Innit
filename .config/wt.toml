@@ -9,5 +9,11 @@
 [[pre-start]]
 deps = "uv venv --python 3.12 .venv && uv pip install -p .venv -qe ."
 
+# git config is repo-shared once set, so this is mostly defense-in-depth for a
+# fresh clone on another machine — but it's what makes .githooks/pre-commit's
+# gitleaks gate actually active in every worktree without a manual step.
+[[pre-start]]
+hooks = "git config core.hooksPath .githooks"
+
 [pre-merge]
 test = ".venv/bin/python -m pytest -q"
