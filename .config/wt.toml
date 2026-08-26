@@ -17,3 +17,13 @@ hooks = "git config core.hooksPath .githooks"
 
 [pre-merge]
 test = ".venv/bin/python -m pytest -q"
+
+# data/backups/ holds rotating daily DB snapshots (~8GB each, growing) — a
+# launchd backup job's output, not something any worktree needs. The global
+# *.db exclude in user config doesn't catch this: `wt step copy-ignored`
+# carries data/backups/ as one directory entry (from git's --directory-mode
+# ignore listing), so a file-pattern exclude like *.db never gets applied to
+# its individual contents. Excluding the directory itself is the only way to
+# keep it out (wt-doctor footprint scan, 2026-08-26).
+[step.copy-ignored]
+exclude = ["data/backups/"]
