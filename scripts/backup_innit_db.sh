@@ -62,7 +62,17 @@ done
 
 if [ "$INNIT_BACKUP_SKIP_REMOTE" != "1" ]; then
   echo "Syncing snapshots to $INNIT_BACKUP_REMOTE:$INNIT_BACKUP_REMOTE_DIR/..." | tee -a "$LOG_FILE"
-  rsync -avz --delete "$INNIT_BACKUP_DIR/" "$INNIT_BACKUP_REMOTE:$INNIT_BACKUP_REMOTE_DIR/" 2>&1 | tee -a "$LOG_FILE"
+  # Use the 1Password SSH agent (rotated whatbox key, 2026-09). The helper
+  # checks the agent will sign BEFORE we connect, so a locked 1Password aborts
+  # here instead of racking up failed logins (fail2ban). IdentityAgent=SSH_AUTH_SOCK
+  # pins ssh to the helper's agent regardless of ~/.ssh/config.
+  ENSURE_SSH_AGENT="${INNIT_ENSURE_SSH_AGENT:-$HOME/Dev/_Projects/whatbox/scripts-local/ensure-ssh-agent.sh}"
+  # shellcheck disable=SC1090
+  source "$ENSURE_SSH_AGENT" || exit 1
+  WHATBOX_PUB="${WHATBOX_SSH_PUB:-$HOME/.ssh/id_ed25519_whatbox.pub}"
+  rsync -avz --delete \
+    -e "ssh -o IdentityAgent=SSH_AUTH_SOCK -o IdentitiesOnly=yes -i $WHATBOX_PUB" \
+    "$INNIT_BACKUP_DIR/" "$INNIT_BACKUP_REMOTE:$INNIT_BACKUP_REMOTE_DIR/" 2>&1 | tee -a "$LOG_FILE"
 else
   echo "Skipping remote sync (INNIT_BACKUP_SKIP_REMOTE=1)" | tee -a "$LOG_FILE"
 fi

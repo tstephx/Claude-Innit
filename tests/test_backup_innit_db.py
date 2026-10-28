@@ -98,3 +98,47 @@ def test_backup_prunes_old_snapshots(tmp_path):
     assert result.returncode == 0, result.stdout + result.stderr
     remaining = sorted(backup_dir.glob("innit-*.db"))
     assert len(remaining) == 2
+
+
+def _remote_env(tmp_path, ensure_body):
+    """Env for a remote-enabled run with rsync and the ssh-agent helper stubbed."""
+    src = tmp_path / "innit.db"
+    _make_source_db(src)
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    rsync = bindir / "rsync"
+    rsync.write_text(f'#!/bin/bash\necho "$@" > "{tmp_path}/rsync_args"\n')
+    rsync.chmod(0o755)
+    ensure = tmp_path / "ensure-ssh-agent.sh"
+    ensure.write_text(ensure_body)
+    return {
+        "PATH": f"{bindir}:{os.environ['PATH']}",
+        "INNIT_DB_SRC": str(src),
+        "INNIT_BACKUP_DIR": str(tmp_path / "backups"),
+        "INNIT_BACKUP_LOG_DIR": str(tmp_path / "logs"),
+        "INNIT_ENSURE_SSH_AGENT": str(ensure),
+    }
+
+
+def test_remote_sync_loads_agent_and_pins_identity(tmp_path):
+    env = _remote_env(tmp_path, f'touch "{tmp_path}/ensure_ran"\n')
+
+    result = _run_backup(env)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (tmp_path / "ensure_ran").exists()
+    args = (tmp_path / "rsync_args").read_text()
+    assert "IdentityAgent=SSH_AUTH_SOCK" in args
+    assert "IdentitiesOnly=yes" in args
+    assert "id_ed25519_whatbox.pub" in args
+
+
+def test_remote_sync_aborts_before_rsync_when_key_unavailable(tmp_path):
+    env = _remote_env(tmp_path, "echo 'could not load key' >&2\nexit 1\n")
+
+    result = _run_backup(env)
+
+    assert result.returncode != 0
+    assert not (tmp_path / "rsync_args").exists()
+    assert "backup completed" not in result.stdout
+    assert list((tmp_path / "backups").glob("innit-*.db")), "local snapshot must still be kept"
