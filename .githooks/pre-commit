@@ -1,5 +1,5 @@
 #!/bin/sh
-# Local secret-scanning gate — blocks a commit that stages a live credential.
+# Pre-commit gate: gitleaks secret scan (blocking) + CLAUDE.md reminder (advisory).
 # Wiring (one-time per clone, shared across worktrees):
 #   git config core.hooksPath .githooks
 set -e
@@ -11,3 +11,12 @@ if ! command -v gitleaks >/dev/null 2>&1; then
 fi
 
 gitleaks protect --staged --redact
+
+# Advisory reminder (ported from the old .git/hooks/pre-commit, which
+# core.hooksPath shadows). Never blocks the commit.
+if git diff --cached --name-only | grep -qE '\.py$'; then
+    echo ""
+    echo "📝 Reminder: If you added tools or changed architecture,"
+    echo "   consider updating CLAUDE.md"
+    echo ""
+fi
