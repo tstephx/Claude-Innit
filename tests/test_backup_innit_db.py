@@ -91,7 +91,7 @@ def test_backup_prunes_old_snapshots(tmp_path):
             "INNIT_BACKUP_DIR": str(backup_dir),
             "INNIT_BACKUP_LOG_DIR": str(log_dir),
             "INNIT_BACKUP_SKIP_REMOTE": "1",
-            "INNIT_BACKUP_RETENTION": "2",
+            "INNIT_BACKUP_LOCAL_RETENTION": "2",
         }
     )
 
@@ -109,6 +109,9 @@ def _remote_env(tmp_path, ensure_body):
     rsync = bindir / "rsync"
     rsync.write_text(f'#!/bin/bash\necho "$@" > "{tmp_path}/rsync_args"\n')
     rsync.chmod(0o755)
+    ssh = bindir / "ssh"
+    ssh.write_text(f'#!/bin/bash\necho "$@" > "{tmp_path}/ssh_args"\n')
+    ssh.chmod(0o755)
     ensure = tmp_path / "ensure-ssh-agent.sh"
     ensure.write_text(ensure_body)
     return {
@@ -142,3 +145,48 @@ def test_remote_sync_aborts_before_rsync_when_key_unavailable(tmp_path):
     assert not (tmp_path / "rsync_args").exists()
     assert "backup completed" not in result.stdout
     assert list((tmp_path / "backups").glob("innit-*.db")), "local snapshot must still be kept"
+
+
+def test_remote_sync_moves_snapshots_off_machine(tmp_path):
+    """Local dir is staging only: rsync removes sources after upload, never mirrors-deletes."""
+    env = _remote_env(tmp_path, "true\n")
+
+    result = _run_backup(env)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    args = (tmp_path / "rsync_args").read_text()
+    assert "--remove-source-files" in args
+    assert "--delete" not in args.split()
+    assert "innit-" in args and ".db" in args
+
+
+def test_remote_prune_keeps_retention_on_server(tmp_path):
+    env = _remote_env(tmp_path, "true\n")
+    env["INNIT_BACKUP_RETENTION"] = "5"
+
+    result = _run_backup(env)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    ssh_args = (tmp_path / "ssh_args").read_text()
+    assert "IdentityAgent=SSH_AUTH_SOCK" in ssh_args
+    assert "echobyte@cucumber.whatbox.ca" in ssh_args
+    assert "tail -n +6" in ssh_args
+
+
+def test_local_retention_defaults_to_one_unsent_snapshot(tmp_path):
+    """A failed upload leaves at most one snapshot behind, not an ever-growing pile."""
+    env = _remote_env(tmp_path, "exit 1\n")
+    backup_dir = tmp_path / "backups"
+    backup_dir.mkdir()
+    for i in range(2):
+        fake = backup_dir / f"innit-2020010{i}-000000.db"
+        _make_source_db(fake)
+        old_time = time.time() - (1000 - i * 10)
+        os.utime(fake, (old_time, old_time))
+
+    result = _run_backup(env)
+
+    assert result.returncode != 0
+    remaining = list(backup_dir.glob("innit-*.db"))
+    assert len(remaining) == 1
+    assert "20200" not in remaining[0].name

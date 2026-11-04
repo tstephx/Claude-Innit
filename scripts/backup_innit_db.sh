@@ -8,6 +8,12 @@
 # single-file snapshot verified with PRAGMA integrity_check before it
 # ever leaves this machine.
 #
+# Snapshots are NOT kept on this machine: INNIT_BACKUP_DIR is a staging area.
+# rsync --remove-source-files deletes each snapshot locally once it is safely on
+# whatbox, and retention (INNIT_BACKUP_RETENTION) is enforced on the server.
+# If the upload fails, at most INNIT_BACKUP_LOCAL_RETENTION unsent snapshots
+# (default 1) are kept locally and retried on the next run.
+#
 # Run manually, or via the com.taylorstephens.innit-db-backup LaunchAgent.
 
 set -euo pipefail
@@ -15,6 +21,7 @@ set -euo pipefail
 INNIT_DB_SRC="${INNIT_DB_SRC:-$HOME/Dev/_Projects/Claude-Innit/data/innit.db}"
 INNIT_BACKUP_DIR="${INNIT_BACKUP_DIR:-$HOME/Dev/_Projects/Claude-Innit/data/backups}"
 INNIT_BACKUP_RETENTION="${INNIT_BACKUP_RETENTION:-3}"
+INNIT_BACKUP_LOCAL_RETENTION="${INNIT_BACKUP_LOCAL_RETENTION:-1}"
 INNIT_BACKUP_REMOTE="${INNIT_BACKUP_REMOTE:-echobyte@cucumber.whatbox.ca}"
 INNIT_BACKUP_REMOTE_DIR="${INNIT_BACKUP_REMOTE_DIR:-Dev-backup/innit-db-backups}"
 INNIT_BACKUP_LOG_DIR="${INNIT_BACKUP_LOG_DIR:-$HOME/Dev/_Projects/Claude-Innit/logs}"
@@ -53,9 +60,9 @@ if [ "$INTEGRITY" != "ok" ]; then
 fi
 echo "Integrity check passed: ok" | tee -a "$LOG_FILE"
 
-echo "Pruning local snapshots beyond retention ($INNIT_BACKUP_RETENTION)..." | tee -a "$LOG_FILE"
+echo "Pruning unsent local snapshots beyond $INNIT_BACKUP_LOCAL_RETENTION..." | tee -a "$LOG_FILE"
 # shellcheck disable=SC2012
-ls -1t "$INNIT_BACKUP_DIR"/innit-*.db 2>/dev/null | tail -n "+$((INNIT_BACKUP_RETENTION + 1))" | while IFS= read -r old; do
+ls -1t "$INNIT_BACKUP_DIR"/innit-*.db 2>/dev/null | tail -n "+$((INNIT_BACKUP_LOCAL_RETENTION + 1))" | while IFS= read -r old; do
   echo "Removing old snapshot: $old" | tee -a "$LOG_FILE"
   rm -f "$old"
 done
@@ -70,9 +77,17 @@ if [ "$INNIT_BACKUP_SKIP_REMOTE" != "1" ]; then
   # shellcheck disable=SC1090
   source "$ENSURE_SSH_AGENT" || exit 1
   WHATBOX_PUB="${WHATBOX_SSH_PUB:-$HOME/.ssh/id_ed25519_whatbox.pub}"
-  rsync -avz --delete \
-    -e "ssh -o IdentityAgent=SSH_AUTH_SOCK -o IdentitiesOnly=yes -i $WHATBOX_PUB" \
-    "$INNIT_BACKUP_DIR/" "$INNIT_BACKUP_REMOTE:$INNIT_BACKUP_REMOTE_DIR/" 2>&1 | tee -a "$LOG_FILE"
+  SSH_OPTS=(-o IdentityAgent=SSH_AUTH_SOCK -o IdentitiesOnly=yes -i "$WHATBOX_PUB")
+  # Upload every staged snapshot (incl. any left by a failed run); rsync
+  # deletes each local file only after it has transferred successfully.
+  rsync -avz --remove-source-files \
+    -e "ssh ${SSH_OPTS[*]}" \
+    "$INNIT_BACKUP_DIR"/innit-*.db "$INNIT_BACKUP_REMOTE:$INNIT_BACKUP_REMOTE_DIR/" 2>&1 | tee -a "$LOG_FILE"
+
+  echo "Pruning remote snapshots beyond retention ($INNIT_BACKUP_RETENTION)..." | tee -a "$LOG_FILE"
+  ssh "${SSH_OPTS[@]}" "$INNIT_BACKUP_REMOTE" \
+    "cd '$INNIT_BACKUP_REMOTE_DIR' && ls -1t innit-*.db 2>/dev/null | tail -n +$((INNIT_BACKUP_RETENTION + 1)) | xargs -r rm -fv" \
+    2>&1 | tee -a "$LOG_FILE"
 else
   echo "Skipping remote sync (INNIT_BACKUP_SKIP_REMOTE=1)" | tee -a "$LOG_FILE"
 fi
