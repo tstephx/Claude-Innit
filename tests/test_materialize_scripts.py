@@ -98,6 +98,10 @@ class TestResolveCardPath:
         card.write_text("x")
         assert resolve_card_path("zeta") == "Projects/zeta/_PROJECT_CARD"
 
+    def test_empty_project_returns_none(self, tmp_path):
+        assert resolve_card_path(None, vault_root=tmp_path) is None
+        assert resolve_card_path("", vault_root=tmp_path) is None
+
     def test_stale_map_entries_corrected(self):
         from materialize_common import PROJECT_CARD_MAP
 
@@ -128,6 +132,7 @@ class TestResolveCardPath:
             env={"VAULT_ROOT": str(tmp_path), "PATH": "/usr/bin:/bin"},
             cwd=SCRIPTS_DIR,
             capture_output=True,
+            check=False,
             text=True,
         )
         assert out.stdout.strip() == str(tmp_path)

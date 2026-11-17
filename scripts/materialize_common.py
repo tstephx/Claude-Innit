@@ -116,8 +116,10 @@ def _existing_card(vault_root: Path, rel: str) -> str | None:
     """
     cur = vault_root
     parts = []
-    for i, part in enumerate(rel.split("/")):
-        want = f"{part}.md" if i == len(rel.split("/")) - 1 else part
+    components = rel.split("/")
+    last = len(components) - 1
+    for i, part in enumerate(components):
+        want = f"{part}.md" if i == last else part
         try:
             names = os.listdir(cur)
         except OSError:
@@ -130,7 +132,7 @@ def _existing_card(vault_root: Path, rel: str) -> str | None:
         if hit is None:
             return None
         cur = cur / hit
-        parts.append(hit.removesuffix(".md") if i == len(rel.split("/")) - 1 else hit)
+        parts.append(hit.removesuffix(".md") if i == last else hit)
     return "/".join(parts) if cur.is_file() else None
 
 
@@ -141,6 +143,8 @@ def resolve_card_path(project: str, vault_root: Path | None = None) -> str | Non
     path only when that card exists under the vault, so callers never emit a dead
     `related:` link (mirrors sync_vault `_card_related`, #159/#176).
     """
+    if not project:
+        return None
     root = vault_root if vault_root is not None else VAULT_ROOT
     rel = PROJECT_CARD_MAP.get(project) or PROJECT_CARD_MAP.get(
         project.lower(), f"Projects/{project}/_PROJECT_CARD"
