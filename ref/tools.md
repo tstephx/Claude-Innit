@@ -136,6 +136,7 @@ Index vault markdown files into the search database. Scans vault root + extra pa
 - Excludes framework dirs (Daily, Inbox, Archive, Claude-Memory) from module assignment
 - Cleans up DB entries for files deleted from disk
 - Extra paths configured via `EXTRA_INDEX_PATHS` env var (default: `~/Dev/_Lab:~/Dev/_Projects`)
+- Skips every path matching a pattern in `<vault_root>/.index-exclude`; with no such file, the built-in build-artifact list applies. `EXCLUDE_INDEX_PATTERNS` (colon-separated) adds patterns and never removes one from the file
 - Returns: `{ "indexed": N, "updated": N, "unchanged": N, "removed": N, "errors": N, "duration_ms": N }`
 
 ---

@@ -73,6 +73,7 @@ Register as an MCP server in the consuming project's `.mcp.json`, under `mcpServ
 |----------|---------|---------|
 | `VAULT_ROOT` | `~/Dev/Obsidian-Second-Brain` | Obsidian vault root path |
 | `EXTRA_INDEX_PATHS` | `~/Dev/_Lab:~/Dev/_Projects` | Colon-separated extra dirs to index |
+| `EXCLUDE_INDEX_PATTERNS` | (unset) | Colon-separated substring patterns added to the vault's `.index-exclude` list (or to the built-ins when the vault has no file) |
 | `BOOK_LIBRARY_DB` | (auto-detected) | Path to book-library SQLite DB |
 
 ---
