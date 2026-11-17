@@ -67,6 +67,53 @@ def _detect_module(
     return None
 
 
+# The vault's own list of what must never be indexed, at the vault root. Every
+# caller that indexes a vault goes through VaultIndexer, which reads this file,
+# so the MCP server and standalone scripts cannot drift apart. Vault-specific
+# (and private) path names belong there, not in this repository.
+INDEX_EXCLUDE_FILENAME = ".index-exclude"
+
+# Used only when the vault has no .index-exclude and the caller passes no list.
+DEFAULT_EXCLUDE_PATTERNS = [
+    "/node_modules/",
+    "/.git/",
+    "/.obsidian/",
+    ".DS_Store",
+    "/__pycache__/",
+    "/.pytest_cache/",
+    "/.venv/",
+    "/venv/",
+    "/site-packages/",
+    "/.hypothesis/",
+    "/htmlcov/",
+    "/dist/",
+    "/build/",
+    "/.mypy_cache/",
+    "/.ruff_cache/",
+    "/.tox/",
+    "/.eggs/",
+    ".egg-info/",
+    "/.brain/tests/",
+    "/rss-news/",
+    "/vault-rss-feeds/",
+    "/_backups/",
+]
+
+
+def load_index_exclude_file(vault_root: str | Path) -> list[str]:
+    """Patterns from <vault_root>/.index-exclude, or [] when the vault has none.
+
+    One pattern per line, matched as a substring of the absolute file path.
+    Blank lines and lines starting with '#' are skipped. A file that exists but
+    cannot be read raises, so indexing stops instead of running without it.
+    """
+    path = Path(vault_root) / INDEX_EXCLUDE_FILENAME
+    if not path.exists():
+        return []
+    lines = (line.strip() for line in path.read_text(encoding="utf-8").splitlines())
+    return [line for line in lines if line and not line.startswith("#")]
+
+
 class VaultIndexer:
     """Indexes vault markdown files into the claude-innit database."""
 
@@ -80,29 +127,12 @@ class VaultIndexer:
         self.db = db
         self.vault_root = Path(vault_root)
         self.extra_paths = [Path(p) for p in (extra_paths or [])]
-        self.exclude_patterns = exclude_patterns or [
-            "/node_modules/",
-            "/.git/",
-            "/.obsidian/",
-            ".DS_Store",
-            "/__pycache__/",
-            "/.pytest_cache/",
-            "/.venv/",
-            "/venv/",
-            "/site-packages/",
-            "/.hypothesis/",
-            "/htmlcov/",
-            "/dist/",
-            "/build/",
-            "/.mypy_cache/",
-            "/.ruff_cache/",
-            "/.tox/",
-            "/.eggs/",
-            ".egg-info/",
-            "/.brain/tests/",
-            "/rss-news/",
-            "/_backups/",
-        ]
+        # The vault's .index-exclude always applies. A caller's list is added to
+        # it and can never drop one of its paths; the built-ins are the fallback
+        # for a vault with no file.
+        file_patterns = load_index_exclude_file(self.vault_root)
+        base = list(exclude_patterns or file_patterns or DEFAULT_EXCLUDE_PATTERNS)
+        self.exclude_patterns = base + [p for p in file_patterns if p not in base]
 
     def _should_exclude(self, path: Path) -> bool:
         """Check if path matches any exclude pattern or contains dotdirs."""

@@ -560,6 +560,13 @@ class InnitServer:
         ]
 
 
+def exclude_patterns_from_env() -> list[str]:
+    """Extra exclude patterns from EXCLUDE_INDEX_PATTERNS (colon-separated)."""
+    import os
+
+    return [p for p in os.environ.get("EXCLUDE_INDEX_PATTERNS", "").split(":") if p]
+
+
 def create_server(
     db_path: Path,
     memories_dir: Path,
@@ -639,19 +646,12 @@ async def main():
         ]
     )
 
-    # Paths to exclude from indexing (colon-separated patterns)
-    exclude_index_patterns = (
-        os.environ.get("EXCLUDE_INDEX_PATTERNS", "").split(":")
-        if os.environ.get("EXCLUDE_INDEX_PATTERNS")
-        else ["/rss-news/", "/vault-rss-feeds/"]
-    )
-
     innit_server = create_server(
         db_path,
         memories_dir,
         vault_root=vault_root,
         extra_index_paths=extra_index_paths,
-        exclude_index_patterns=exclude_index_patterns,
+        exclude_index_patterns=exclude_patterns_from_env(),
     )
 
     async with stdio_server() as (read_stream, write_stream):

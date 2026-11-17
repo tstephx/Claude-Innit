@@ -132,7 +132,9 @@ Chunks are stored in `vault_chunks` table with FK to `vault_files`. Each chunk g
 
 ### Indexer exclusions
 
-`VaultIndexer` excludes build-artifact directories (`node_modules`, `site-packages`, `dist`, `build`, `.hypothesis`, `htmlcov`, `.mypy_cache`, `.ruff_cache`, `.tox`, `.eggs`, `.egg-info`, etc.) via `/`-prefixed patterns, to prevent substring false positives against real content directories.
+`VaultIndexer` excludes build-artifact directories (`node_modules`, `site-packages`, `dist`, `build`, `.hypothesis`, `htmlcov`, `.mypy_cache`, `.ruff_cache`, `.tox`, `.eggs`, `.egg-info`, etc.) via `/`-prefixed patterns, to prevent substring false positives against real content directories. That built-in list (`DEFAULT_EXCLUDE_PATTERNS`) is only the fallback.
+
+A vault can carry its own list in `<vault_root>/.index-exclude` (one substring pattern per line, `#` comments). `VaultIndexer` reads it on every run, so the MCP server and any standalone script that indexes the same vault share one list. When the file exists it is the full list and the built-ins are not applied; a list passed by the caller (the server's `EXCLUDE_INDEX_PATTERNS`, a script's own argument) is added to the file's patterns and cannot remove one. Vault-specific or private path names belong in that file, not in this repository.
 
 ---
 

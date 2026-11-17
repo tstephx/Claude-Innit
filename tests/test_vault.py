@@ -6,15 +6,18 @@ import pytest
 
 from claude_innit.db.database import MemoryDatabase
 from claude_innit.tools.vault import (
+    DEFAULT_EXCLUDE_PATTERNS,
+    INDEX_EXCLUDE_FILENAME,
     VaultIndexer,
-    vault_index,
-    vault_search,
-    vault_related,
-    vault_stats,
     _content_hash,
     _detect_module,
-    _parse_frontmatter,
     _hybrid_merge,
+    _parse_frontmatter,
+    load_index_exclude_file,
+    vault_index,
+    vault_related,
+    vault_search,
+    vault_stats,
 )
 
 
@@ -367,6 +370,86 @@ class TestVaultIndexer:
 
         indexer = VaultIndexer(db, str(vault), extra_paths=[str(extra)])
         assert indexer._should_exclude(ei / "PKG-INFO")
+
+
+class TestIndexExcludeFile:
+    """<vault_root>/.index-exclude is the one list every indexing caller shares."""
+
+    @staticmethod
+    def _note(path):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("---\ntype: reference\n---\nbody\n")
+        return path
+
+    def test_listed_paths_are_not_indexed(self, db, tmp_path):
+        vault = tmp_path / "vault"
+        hidden = self._note(vault / "Private" / "People" / "a.md")
+        kept = self._note(vault / "Research" / "note.md")
+        (vault / INDEX_EXCLUDE_FILENAME).write_text("/Private/People/\n")
+
+        vault_index(db, vault_root=str(vault))
+
+        assert db.get_vault_file(str(hidden)) is None
+        assert db.get_vault_file(str(kept)) is not None
+
+    def test_explicit_patterns_add_to_the_file_never_replace_it(self, db, tmp_path):
+        """A caller's own list (the server's env var, a script's literal) must
+        not be able to drop a path the vault file excludes."""
+        vault = tmp_path / "vault"
+        hidden = self._note(vault / "Private" / "People" / "a.md")
+        other = self._note(vault / "other" / "b.md")
+        (vault / INDEX_EXCLUDE_FILENAME).write_text("/Private/People/\n")
+
+        vault_index(db, vault_root=str(vault), exclude_patterns=["/other/"])
+
+        assert db.get_vault_file(str(hidden)) is None
+        assert db.get_vault_file(str(other)) is None
+
+    def test_file_is_the_full_list_not_an_addition_to_builtins(self, db, tmp_path):
+        """A vault that keeps a built-in path searchable leaves it out of its file."""
+        vault = tmp_path / "vault"
+        backup = self._note(vault / "_backups" / "old.md")
+        (vault / INDEX_EXCLUDE_FILENAME).write_text("/Private/People/\n")
+
+        vault_index(db, vault_root=str(vault))
+
+        assert db.get_vault_file(str(backup)) is not None
+
+    def test_anchored_pattern_spares_same_name_in_extra_path(self, db, tmp_path):
+        vault = tmp_path / "vault"
+        extra = tmp_path / "extra"
+        hidden = self._note(vault / "Projects" / "site" / "work" / "a.md")
+        source = self._note(extra / "site" / "work" / "a.md")
+        (vault / INDEX_EXCLUDE_FILENAME).write_text("/vault/Projects/site/work/\n")
+
+        vault_index(db, vault_root=str(vault), extra_paths=[str(extra)])
+
+        assert db.get_vault_file(str(hidden)) is None
+        assert db.get_vault_file(str(source)) is not None
+
+    def test_comments_and_blank_lines_are_skipped(self, tmp_path):
+        vault = tmp_path / "vault"
+        vault.mkdir()
+        (vault / INDEX_EXCLUDE_FILENAME).write_text(
+            "# why this is here\n\n/Private/People/\n  /with space (category)/  \n"
+        )
+
+        assert load_index_exclude_file(vault) == [
+            "/Private/People/",
+            "/with space (category)/",
+        ]
+
+    def test_missing_file_means_no_file_patterns(self, tmp_path):
+        assert load_index_exclude_file(tmp_path) == []
+
+    def test_no_file_falls_back_to_builtins(self, db, tmp_path):
+        vault = tmp_path / "vault"
+        vault.mkdir()
+
+        indexer = VaultIndexer(db, str(vault))
+
+        assert indexer.exclude_patterns == DEFAULT_EXCLUDE_PATTERNS
+        assert "/vault-rss-feeds/" in DEFAULT_EXCLUDE_PATTERNS
 
 
 class TestVaultSearch:
