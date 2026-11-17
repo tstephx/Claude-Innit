@@ -3,13 +3,16 @@
 Shared constants and utilities for materialize_sessions.py and materialize_memories.py.
 """
 
+import os
 import re
 from pathlib import Path
 
 # ── Paths ──────────────────────────────────────────────────────────────────────
 
 INNIT_BASE = Path.home() / "Dev/_Projects/Claude-Innit/data/memories"
-VAULT_ROOT = Path.home() / "Dev/Obsidian-Second-Brain"
+VAULT_ROOT = Path(
+    os.environ.get("VAULT_ROOT", str(Path.home() / "Dev/Obsidian-Second-Brain"))
+)
 VAULT_SESSIONS = VAULT_ROOT / "Sessions"
 VAULT_MEMORY = VAULT_ROOT / "Claude-Memory"
 
@@ -18,7 +21,6 @@ VAULT_MEMORY = VAULT_ROOT / "Claude-Memory"
 # Used to generate [[wikilinks]] in the related: field.
 
 PROJECT_CARD_MAP = {
-    "api-dashboard": "Projects/api-dashboard/_PROJECT_CARD",
     "book-ingestion": "Projects/mcp (category)/mcp-books (category)/book-ingestion-python/_PROJECT_CARD",
     "book-ingestion-python": "Projects/mcp (category)/mcp-books (category)/book-ingestion-python/_PROJECT_CARD",
     "book-mcp-server": "Projects/mcp (category)/mcp-books (category)/book-mcp-server/_PROJECT_CARD",
@@ -27,7 +29,7 @@ PROJECT_CARD_MAP = {
     "claude-cheatsheet": "Projects/claude-cheatsheet/_PROJECT_CARD",
     "claude-innit": "Projects/mcp (category)/Claude-Innit/_PROJECT_CARD",
     "claude-workspace": "Projects/claude-workspace/_PROJECT_CARD",
-    "dev-scripts": "Projects/dev-scripts/_PROJECT_CARD",
+    "dev-scripts": "Projects/claude-projects/dev-scripts/_PROJECT_CARD",
     "document-intelligence": "Projects/taylor-work (category)/document-intelligence/_PROJECT_CARD",
     "fast-mail": "Projects/mcp (category)/fast-mail/_PROJECT_CARD",
     "my-mcp-portfolio": "Projects/mcp (category)/my-mcp-portfolio/_PROJECT_CARD",
@@ -37,12 +39,11 @@ PROJECT_CARD_MAP = {
     "website-portfolio": "Projects/whatbox-server/website-portfolio/_PROJECT_CARD",
     "whatbox": "Projects/whatbox-server/whatbox/_PROJECT_CARD",
     "whatbox-portfolio-mcp": "Projects/mcp (category)/whatbox-portfolio-mcp/_PROJECT_CARD",
-    "write-pipeline": "Projects/whatbox-server/whatbox/morning-reader/_PROJECT_CARD",
+    "write-pipeline": "Projects/write-pipeline/_PROJECT_CARD",
     # Aliases
-    "_lab": "Projects/lab-docs/_PROJECT_CARD",
     "obsidian-brain": "Projects/obsidian-brain-framework/_PROJECT_CARD",
     "obsidian-second-brain": "Projects/obsidian-brain-framework/_PROJECT_CARD",
-    "dotfiles": "Projects/dotfiles/_PROJECT_CARD",
+    "dotfiles": "Projects/claude-projects/dotfiles/_PROJECT_CARD",
     "action-tracker": "Projects/action-tracker/_PROJECT_CARD",
     "claude-projects": "Projects/claude-projects/_PROJECT_CARD",
     "rss-news-server": "Projects/whatbox-server/whatbox/rss-news-server/_PROJECT_CARD",
@@ -107,6 +108,45 @@ def strip_frontmatter_body(text: str) -> str:
     return body.strip()
 
 
-def resolve_card_path(project: str) -> str:
-    """Look up the _PROJECT_CARD path for a project slug, with fallback."""
-    return PROJECT_CARD_MAP.get(project, f"Projects/{project}/_PROJECT_CARD")
+def _existing_card(vault_root: Path, rel: str) -> str | None:
+    """Return vault-relative `rel` (no .md) in its on-disk casing if the note exists.
+
+    Components are matched case-insensitively so the result is the same on
+    case-sensitive and case-insensitive filesystems (mirrors sync_vault `_project_link`).
+    """
+    cur = vault_root
+    parts = []
+    components = rel.split("/")
+    last = len(components) - 1
+    for i, part in enumerate(components):
+        want = f"{part}.md" if i == last else part
+        try:
+            names = os.listdir(cur)
+        except OSError:
+            return None
+        hit = (
+            want
+            if want in names
+            else next((n for n in names if n.lower() == want.lower()), None)
+        )
+        if hit is None:
+            return None
+        cur = cur / hit
+        parts.append(hit.removesuffix(".md") if i == last else hit)
+    return "/".join(parts) if cur.is_file() else None
+
+
+def resolve_card_path(project: str, vault_root: Path | None = None) -> str | None:
+    """Vault-relative _PROJECT_CARD path (no .md) for a project slug, or None.
+
+    Uses PROJECT_CARD_MAP, falling back to Projects/<slug>/_PROJECT_CARD. Returns a
+    path only when that card exists under the vault, so callers never emit a dead
+    `related:` link (mirrors sync_vault `_card_related`, #159/#176).
+    """
+    if not project:
+        return None
+    root = vault_root if vault_root is not None else VAULT_ROOT
+    rel = PROJECT_CARD_MAP.get(project) or PROJECT_CARD_MAP.get(
+        project.lower(), f"Projects/{project}/_PROJECT_CARD"
+    )
+    return _existing_card(root, rel)

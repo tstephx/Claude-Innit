@@ -69,7 +69,7 @@ def build_vault_note(
     body: str,
 ) -> str:
     card_path = resolve_card_path(project)
-    related_line = f'  - "[[{card_path}]]"'
+    related_block = f'related:\n  - "[[{card_path}]]"\n' if card_path else ""
 
     # Build topics list — project first, then additional topics (deduped)
     all_topics = [project] + [t for t in topics if t != project]
@@ -88,9 +88,7 @@ tags:
 {tags_yaml}
 topics:
 {topics_yaml}
-related:
-{related_line}
-session_project: {project}
+{related_block}session_project: {project}
 memory_id: {memory_id}
 confidence: developing
 last_reviewed: ""

@@ -45,6 +45,7 @@ def build_project_note(project_slug: str, fragments: list[tuple[str, str]]) -> s
     fragments: list of (filename, body_text)
     """
     card_path = resolve_card_path(project_slug)
+    related_block = f'related:\n  - "[[{card_path}]]"\n' if card_path else ""
     count = len(fragments)
     body_parts = "\n\n---\n\n".join(body for _, body in fragments)
 
@@ -61,9 +62,7 @@ tags:
   - project/{project_slug}
 topics:
   - {project_slug}
-related:
-  - "[[{card_path}]]"
-innit_project: {project_slug}
+{related_block}innit_project: {project_slug}
 innit_fragment_count: {count}
 confidence: developing
 last_reviewed: ""
