@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Shared claude-innit MCP server: one process on http://127.0.0.1:8767/mcp
+  serving every Claude Code session. Install steps: launchd/README.md.
+  Paths point at the canonical checkout (not a worktree) on purpose.
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.taylorstephens.claude-innit-http</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>/Users/taylorstephens/Dev/_Projects/Claude-Innit/launchd/run-http-server.sh</string>
+    </array>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>CLAUDE_INNIT_REPO</key>
+        <string>/Users/taylorstephens/Dev/_Projects/Claude-Innit</string>
+        <key>CLAUDE_INNIT_PORT</key>
+        <string>8767</string>
+        <key>VAULT_ROOT</key>
+        <string>/Users/taylorstephens/Dev/Obsidian-Second-Brain</string>
+        <key>EXTRA_INDEX_PATHS</key>
+        <string>/Users/taylorstephens/Dev/_Projects</string>
+        <key>PATH</key>
+        <string>/usr/bin:/bin:/usr/sbin:/sbin</string>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <!-- Restart on any exit; ThrottleInterval spaces out crash loops
+         (e.g. port already in use) so the log stays readable. -->
+    <key>KeepAlive</key>
+    <true/>
+    <key>ThrottleInterval</key>
+    <integer>30</integer>
+
+    <!-- The wrapper writes the server's own output to
+         ~/Library/Logs/claude-innit/http-server.log; these catch anything
+         the wrapper itself prints before it opens that log. -->
+    <key>StandardOutPath</key>
+    <string>/Users/taylorstephens/Library/Logs/claude-innit/launchd.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/taylorstephens/Library/Logs/claude-innit/launchd.err.log</string>
+
+    <key>ProcessType</key>
+    <string>Interactive</string>
+</dict>
+</plist>

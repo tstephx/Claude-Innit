@@ -51,6 +51,7 @@ class InnitServer:
         vault_root: str | None = None,
         extra_index_paths: list[str] | None = None,
         exclude_index_patterns: list[str] | None = None,
+        warm_embeddings: bool = True,
     ):
         self.server = server
         self.db = db
@@ -60,13 +61,26 @@ class InnitServer:
         self.extra_index_paths = extra_index_paths or []
         self.exclude_index_patterns = exclude_index_patterns or []
         self.embedding_store = EmbeddingStore(db)
-        # Pre-load embedding model and matrix to avoid timeout on first query
+        # Serializes the long-running index/re-embed tools. Harmless in stdio
+        # mode; in HTTP mode it stops two sessions from re-indexing the vault
+        # at the same time against the one shared server.
+        self._maintenance_lock = asyncio.Lock()
+        # Pre-load embedding model and matrix to avoid an MCP timeout on the
+        # first semantic query (commit 2ef3a7f). HTTP mode passes
+        # warm_embeddings=False and warms in the background after binding
+        # instead (see warm_embeddings_background), so the listener comes up
+        # without waiting ~5s for torch.
+        if warm_embeddings:
+            self.warm_embeddings()
+        self._tools = self._define_tools()
+
+    def warm_embeddings(self) -> None:
+        """Load the embedding model and vault matrix; degrade gracefully."""
         try:
             self.embedding_store.warm()
             self.embedding_store.load_matrix()
         except Exception:
             pass  # Embeddings optional — degrade gracefully if torch missing
-        self._tools = self._define_tools()
 
     def _define_tools(self) -> list[Tool]:
         """Define all available tools."""
@@ -398,6 +412,12 @@ class InnitServer:
 
     async def call_tool(self, name: str, arguments: dict) -> list[TextContent]:
         """Handle tool calls with error boundary — never drops the MCP connection."""
+        if name in _MAINTENANCE_TOOLS:
+            async with self._maintenance_lock:
+                return await self._call_tool(name, arguments)
+        return await self._call_tool(name, arguments)
+
+    async def _call_tool(self, name: str, arguments: dict) -> list[TextContent]:
         try:
             if name == "get_context":
                 result = get_context(self.db, project=arguments.get("project"))
@@ -560,6 +580,10 @@ class InnitServer:
         ]
 
 
+# Tools that rewrite the index or embeddings; run one at a time per server.
+_MAINTENANCE_TOOLS = frozenset({"vault_index", "vault_rechunk", "admin_sync"})
+
+
 def exclude_patterns_from_env() -> list[str]:
     """Extra exclude patterns from EXCLUDE_INDEX_PATTERNS (colon-separated)."""
     import os
@@ -573,6 +597,7 @@ def create_server(
     vault_root: str | None = None,
     extra_index_paths: list[str] | None = None,
     exclude_index_patterns: list[str] | None = None,
+    warm_embeddings: bool = True,
 ) -> InnitServer:
     """Create and configure the MCP server."""
     # Initialize database
@@ -596,6 +621,7 @@ def create_server(
         vault_root=vault_root,
         extra_index_paths=extra_index_paths,
         exclude_index_patterns=exclude_index_patterns,
+        warm_embeddings=warm_embeddings,
     )
 
     async def list_tools(
@@ -624,8 +650,8 @@ async def _background_sync(sync: MarkdownSync) -> None:
         logger.debug("Background sync failed", exc_info=True)
 
 
-async def main():
-    """Run the MCP server."""
+def _server_config_from_env() -> dict:
+    """Paths and index settings shared by the stdio and HTTP entry points."""
     import os
 
     # Default paths
@@ -646,13 +672,20 @@ async def main():
         ]
     )
 
-    innit_server = create_server(
-        db_path,
-        memories_dir,
-        vault_root=vault_root,
-        extra_index_paths=extra_index_paths,
-        exclude_index_patterns=exclude_patterns_from_env(),
-    )
+    return {
+        "db_path": db_path,
+        "memories_dir": memories_dir,
+        "vault_root": vault_root,
+        "extra_index_paths": extra_index_paths,
+        "exclude_index_patterns": exclude_patterns_from_env(),
+    }
+
+
+async def main():
+    """Run the MCP server over stdio (one process per client)."""
+    cfg = _server_config_from_env()
+    memories_dir = cfg["memories_dir"]
+    innit_server = create_server(**cfg)
 
     async with stdio_server() as (read_stream, write_stream):
         # Defer sync to background — don't block initialize handshake
@@ -666,9 +699,117 @@ async def main():
         )
 
 
+# --- Shared HTTP mode -------------------------------------------------------
+#
+# One long-lived process serving every Claude Code session over MCP
+# streamable HTTP, instead of one stdio process (and one ~500 MB embedding
+# model) per session. Bound to loopback only; DNS-rebinding protection is
+# enabled by the MCP SDK for loopback hosts.
+
+DEFAULT_HTTP_HOST = "127.0.0.1"
+DEFAULT_HTTP_PORT = 8767
+_LOOPBACK_HOSTS = ("127.0.0.1", "localhost", "::1")
+
+
+def build_http_app(
+    innit_server: InnitServer,
+    *,
+    host: str = DEFAULT_HTTP_HOST,
+    run_background_sync: bool = True,
+    warm_in_background: bool = True,
+    session_idle_timeout: float | None = None,
+):
+    """Return the Starlette app serving ``innit_server`` at ``/mcp``.
+
+    Process-wide startup work (markdown sync, embedding warm-up) runs once in
+    the app lifespan — i.e. once per server process — not once per client
+    session, which is what the stdio ``main()`` effectively does today.
+    """
+    from contextlib import asynccontextmanager
+
+    app = innit_server.server.streamable_http_app(host=host)
+    if session_idle_timeout is not None:
+        innit_server.server.session_manager.session_idle_timeout = session_idle_timeout
+    inner_lifespan = app.router.lifespan_context
+    background: list[asyncio.Task] = []
+
+    @asynccontextmanager
+    async def lifespan(a):
+        async with inner_lifespan(a):
+            if run_background_sync and innit_server.memories_dir.exists():
+                background.append(
+                    asyncio.create_task(_background_sync(innit_server.sync))
+                )
+            if warm_in_background:
+                background.append(
+                    asyncio.create_task(
+                        asyncio.to_thread(innit_server.warm_embeddings)
+                    )
+                )
+            try:
+                yield
+            finally:
+                for task in background:
+                    task.cancel()
+
+    app.router.lifespan_context = lifespan
+    app.state.background_tasks = background
+    return app
+
+
+def _http_settings_from_env() -> dict:
+    import os
+
+    host = os.environ.get("CLAUDE_INNIT_HOST", DEFAULT_HTTP_HOST)
+    if host not in _LOOPBACK_HOSTS:
+        raise SystemExit(
+            f"CLAUDE_INNIT_HOST={host!r} refused: the HTTP server has no auth "
+            "and must bind to loopback only"
+        )
+    port = int(os.environ.get("CLAUDE_INNIT_PORT", DEFAULT_HTTP_PORT))
+    idle = os.environ.get("CLAUDE_INNIT_SESSION_IDLE_TIMEOUT")
+    return {
+        "host": host,
+        "port": port,
+        "session_idle_timeout": float(idle) if idle else None,
+    }
+
+
+async def main_http() -> None:
+    """Run one shared MCP server over streamable HTTP on loopback."""
+    import uvicorn
+
+    settings = _http_settings_from_env()
+    logging.basicConfig(
+        level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
+    )
+    innit_server = create_server(**_server_config_from_env(), warm_embeddings=False)
+    app = build_http_app(
+        innit_server,
+        host=settings["host"],
+        session_idle_timeout=settings["session_idle_timeout"],
+    )
+    config = uvicorn.Config(
+        app, host=settings["host"], port=settings["port"], log_level="info"
+    )
+    logger.info(
+        "claude-innit HTTP server on http://%s:%s/mcp", settings["host"], settings["port"]
+    )
+    await uvicorn.Server(config).serve()
+
+
 def main_sync():
-    """Synchronous entry point."""
-    asyncio.run(main())
+    """Synchronous entry point.
+
+    ``CLAUDE_INNIT_TRANSPORT=http`` runs the shared HTTP server; anything else
+    (the default) runs the original per-session stdio server.
+    """
+    import os
+
+    if os.environ.get("CLAUDE_INNIT_TRANSPORT", "stdio").lower() == "http":
+        asyncio.run(main_http())
+    else:
+        asyncio.run(main())
 
 
 if __name__ == "__main__":

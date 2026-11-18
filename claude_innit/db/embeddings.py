@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import functools
+import threading
 from typing import Optional
 
 try:
@@ -19,10 +20,11 @@ class EmbeddingStore:
     MODEL_NAME = "all-MiniLM-L6-v2"
     FAISS_THRESHOLD = 50_000
 
-    def __init__(self, db: Optional[MemoryDatabase] = None):
+    def __init__(self, db: MemoryDatabase | None = None):
         """Initialize with optional database connection."""
         self.db = db
         self._model = None
+        self._model_lock = threading.Lock()
         self._matrix = None  # (N, 384) pre-normalized float32
         self._recency_weights = None  # (N,) float32 — pre-computed per chunk
         self._chunk_meta = (
@@ -34,12 +36,19 @@ class EmbeddingStore:
         self._matrix_loaded = False
 
     def _get_model(self):
-        """Lazy-load the embedding model."""
-        if self._model is None:
-            from sentence_transformers import SentenceTransformer
+        """Lazy-load the embedding model.
 
-            # Force CPU to avoid MPS issues
-            self._model = SentenceTransformer(self.MODEL_NAME, device="cpu")
+        Guarded by a lock: in HTTP mode a background warm-up thread and a
+        client's first semantic query can race here, and loading the model
+        twice would briefly double the ~500 MB footprint.
+        """
+        if self._model is None:
+            with self._model_lock:
+                if self._model is None:
+                    from sentence_transformers import SentenceTransformer
+
+                    # Force CPU to avoid MPS issues
+                    self._model = SentenceTransformer(self.MODEL_NAME, device="cpu")
         return self._model
 
     def warm(self) -> None:
@@ -277,7 +286,7 @@ class EmbeddingStore:
         )
         self.db.commit()
 
-    def get_embedding(self, memory_id: str) -> Optional[np.ndarray]:
+    def get_embedding(self, memory_id: str) -> np.ndarray | None:
         """Get embedding for a memory."""
         if self.db is None:
             return None
