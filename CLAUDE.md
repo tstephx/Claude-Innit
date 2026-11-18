@@ -35,8 +35,9 @@ MCP server giving Claude persistent memory across sessions. Three categories (pe
 
 ## Commands
 ```bash
-.venv/bin/python -m pytest tests/ -v    # all tests (307 total)
-.venv/bin/python -m claude_innit.server # run MCP server
+.venv/bin/python -m pytest tests/ -v    # all tests (358 total)
+.venv/bin/python -m claude_innit.server # run MCP server (stdio, one per session)
+CLAUDE_INNIT_TRANSPORT=http .venv/bin/python -m claude_innit.server  # shared HTTP server, 127.0.0.1:8767/mcp — launchd setup: launchd/README.md
 pip install -e ".[embeddings,dev]"      # dev install with all deps
 pip install -e .                        # minimal install (no embeddings)
 ```
