@@ -414,7 +414,13 @@ class InnitServer:
         """Handle tool calls with error boundary — never drops the MCP connection."""
         if name in _MAINTENANCE_TOOLS:
             async with self._maintenance_lock:
-                return await self._call_tool(name, arguments)
+                try:
+                    return await self._call_tool(name, arguments)
+                finally:
+                    # These are the large write batches: reset the WAL once
+                    # the batch is done (issue #6). Off the event loop, since
+                    # the checkpoint may wait a moment for other connections.
+                    await asyncio.to_thread(self.db.checkpoint_truncate)
         return await self._call_tool(name, arguments)
 
     async def _call_tool(self, name: str, arguments: dict) -> list[TextContent]:
@@ -648,6 +654,9 @@ async def _background_sync(sync: MarkdownSync) -> None:
         await asyncio.to_thread(sync.sync_all)
     except Exception:
         logger.debug("Background sync failed", exc_info=True)
+    finally:
+        # Startup sync is a write batch too: reset the WAL afterwards (issue #6).
+        await asyncio.to_thread(sync.db.checkpoint_truncate)
 
 
 def _server_config_from_env() -> dict:
@@ -692,11 +701,16 @@ async def main():
         if memories_dir.exists():
             asyncio.create_task(_background_sync(innit_server.sync))
 
-        await innit_server.server.run(
-            read_stream,
-            write_stream,
-            innit_server.server.create_initialization_options(),
-        )
+        try:
+            await innit_server.server.run(
+                read_stream,
+                write_stream,
+                innit_server.server.create_initialization_options(),
+            )
+        finally:
+            # Shutdown: reset the WAL (issue #6). Only reached on a clean exit
+            # (stdin closed); a killed process skips it.
+            await asyncio.to_thread(innit_server.db.checkpoint_truncate)
 
 
 # --- Shared HTTP mode -------------------------------------------------------
@@ -751,6 +765,8 @@ def build_http_app(
             finally:
                 for task in background:
                     task.cancel()
+                # Shutdown: reset the WAL (issue #6).
+                await asyncio.to_thread(innit_server.db.checkpoint_truncate)
 
     app.router.lifespan_context = lifespan
     app.state.background_tasks = background
