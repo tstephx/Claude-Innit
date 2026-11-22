@@ -110,7 +110,7 @@ def test_checkpoint_truncate_shrinks_wal_file(db_path):
     _grow_wal(db)
     assert _wal_size(db_path) > SMALL_LIMIT
 
-    result = db.checkpoint_truncate()
+    result = db.checkpoint_truncate(min_wal_bytes=0)
 
     assert isinstance(result, tuple)
     assert all(isinstance(v, int) for v in result)
@@ -127,7 +127,7 @@ def test_checkpoint_backfills_passively_before_truncating(db_path, monkeypatch):
     _grow_wal(db)
     statements = _record_checkpoint_sql(monkeypatch)
 
-    result = db.checkpoint_truncate()
+    result = db.checkpoint_truncate(min_wal_bytes=0)
 
     assert statements == [
         "PRAGMA wal_checkpoint(PASSIVE)",
@@ -153,7 +153,9 @@ def test_pinned_log_skips_truncate_and_is_logged(db_path, monkeypatch, caplog):
         statements = _record_checkpoint_sql(monkeypatch)
 
         with caplog.at_level(logging.WARNING, logger=database.logger.name):
-            result = db.checkpoint_truncate(timeout=0.1)
+            # min_wal_bytes=0: the size gate is out of the way, so only the
+            # held-back PASSIVE can be what keeps TRUNCATE from running.
+            result = db.checkpoint_truncate(timeout=0.1, min_wal_bytes=0)
 
         assert statements == ["PRAGMA wal_checkpoint(PASSIVE)"]
         assert result is not None
@@ -167,8 +169,8 @@ def test_pinned_log_skips_truncate_and_is_logged(db_path, monkeypatch, caplog):
         reader.rollback()
         reader.close()
 
-    # With the reader gone the same call resets the log.
-    result = db.checkpoint_truncate(timeout=0.1)
+    # With the reader gone a call that is allowed to truncate resets the log.
+    result = db.checkpoint_truncate(timeout=0.1, min_wal_bytes=0)
     assert result is not None and result[0] == 0
     assert _wal_size(db_path) == 0
     db.close()
@@ -187,7 +189,7 @@ def test_reader_on_latest_snapshot_makes_truncate_busy(db_path, monkeypatch, cap
         statements = _record_checkpoint_sql(monkeypatch)
 
         with caplog.at_level(logging.WARNING, logger=database.logger.name):
-            result = db.checkpoint_truncate(timeout=0.1)
+            result = db.checkpoint_truncate(timeout=0.1, min_wal_bytes=0)
 
         assert statements == [
             "PRAGMA wal_checkpoint(PASSIVE)",
@@ -200,6 +202,173 @@ def test_reader_on_latest_snapshot_makes_truncate_busy(db_path, monkeypatch, cap
     finally:
         reader.rollback()
         reader.close()
+    db.close()
+
+
+def _own_log_records(caplog) -> list[logging.LogRecord]:
+    return [r for r in caplog.records if r.name == database.logger.name]
+
+
+def test_wal_under_the_limit_is_backfilled_but_not_truncated(
+    db_path, monkeypatch, caplog
+):
+    """Below journal_size_limit there is nothing worth truncating: the
+    checkpoint backfills (PASSIVE, no write lock) and stops there."""
+    db = MemoryDatabase(db_path)
+    _grow_wal(db)
+    size_before = _wal_size(db_path)
+    assert 0 < size_before < database.JOURNAL_SIZE_LIMIT_BYTES
+    statements = _record_checkpoint_sql(monkeypatch)
+
+    with caplog.at_level(logging.WARNING, logger=database.logger.name):
+        result = db.checkpoint_truncate()
+
+    assert statements == ["PRAGMA wal_checkpoint(PASSIVE)"]
+    assert result is not None
+    assert result[0] == 0  # not busy: the log was copied back
+    assert result[1] == result[2] > 0
+    assert _wal_size(db_path) == size_before
+    assert _own_log_records(caplog) == []
+    db.close()
+
+
+def test_wal_under_the_limit_never_waits_behind_a_reader(db_path, monkeypatch, caplog):
+    """The case that stalled every writer: a reader on the newest snapshot.
+    With the log under the limit no TRUNCATE is attempted, so the write lock
+    is never taken and nothing is reported busy."""
+    db = MemoryDatabase(db_path)
+    _grow_wal(db)
+
+    reader = sqlite3.connect(str(db_path))
+    try:
+        reader.execute("BEGIN")
+        reader.execute("SELECT COUNT(*) FROM filler").fetchone()
+        statements = _record_checkpoint_sql(monkeypatch)
+
+        with caplog.at_level(logging.WARNING, logger=database.logger.name):
+            result = db.checkpoint_truncate(timeout=0.1)
+
+        assert statements == ["PRAGMA wal_checkpoint(PASSIVE)"]
+        assert result is not None and result[0] == 0
+        assert _own_log_records(caplog) == []
+    finally:
+        reader.rollback()
+        reader.close()
+    db.close()
+
+
+def test_wal_over_the_limit_is_truncated(db_path, monkeypatch):
+    """Over journal_size_limit the default call does reset the file."""
+    monkeypatch.setattr(database, "JOURNAL_SIZE_LIMIT_BYTES", SMALL_LIMIT)
+    db = MemoryDatabase(db_path)
+    _grow_wal(db)
+    assert _wal_size(db_path) > SMALL_LIMIT
+    statements = _record_checkpoint_sql(monkeypatch)
+
+    result = db.checkpoint_truncate()
+
+    assert statements == [
+        "PRAGMA wal_checkpoint(PASSIVE)",
+        "PRAGMA wal_checkpoint(TRUNCATE)",
+    ]
+    assert result is not None and result[0] == 0
+    assert _wal_size(db_path) == 0
+    db.close()
+
+
+def test_wal_exactly_at_the_threshold_is_not_truncated(db_path, monkeypatch):
+    """The threshold is exclusive: only a file larger than it is truncated."""
+    db = MemoryDatabase(db_path)
+    _grow_wal(db)
+    size = _wal_size(db_path)
+    statements = _record_checkpoint_sql(monkeypatch)
+
+    result = db.checkpoint_truncate(min_wal_bytes=size)
+    assert statements == ["PRAGMA wal_checkpoint(PASSIVE)"]
+    assert result is not None and result[0] == 0
+    assert _wal_size(db_path) == size
+
+    statements.clear()
+    result = db.checkpoint_truncate(min_wal_bytes=size - 1)
+    assert statements == [
+        "PRAGMA wal_checkpoint(PASSIVE)",
+        "PRAGMA wal_checkpoint(TRUNCATE)",
+    ]
+    assert result is not None and result[0] == 0
+    assert _wal_size(db_path) == 0
+    db.close()
+
+
+def _record_connections(monkeypatch) -> list[dict]:
+    """Record the keyword arguments and the close() calls of every connection
+    opened from now on. Open any plain reader before calling this."""
+    opened: list[dict] = []
+    real_connect = sqlite3.connect
+
+    class Tracking:
+        def __init__(self, conn, entry):
+            self._conn = conn
+            self._entry = entry
+
+        def execute(self, sql, *args):
+            return self._conn.execute(sql, *args)
+
+        def close(self):
+            self._entry["closed"] += 1
+            self._conn.close()
+
+    def connect(*args, **kwargs):
+        entry = {"kwargs": kwargs, "closed": 0}
+        opened.append(entry)
+        return Tracking(real_connect(*args, **kwargs), entry)
+
+    monkeypatch.setattr(database.sqlite3, "connect", connect)
+    return opened
+
+
+def test_timeout_reaches_the_checkpoint_connection(db_path, monkeypatch):
+    """The short busy timeout is what bounds a TRUNCATE's wait under the write
+    lock, so it has to be the timeout of the connection that runs it."""
+    db = MemoryDatabase(db_path)
+    _grow_wal(db)
+    opened = _record_connections(monkeypatch)
+
+    db.checkpoint_truncate()
+    db.checkpoint_truncate(timeout=0.25)
+
+    assert [o["kwargs"]["timeout"] for o in opened] == [
+        database.CHECKPOINT_BUSY_TIMEOUT_SECONDS,
+        0.25,
+    ]
+    db.close()
+
+
+def test_checkpoint_connection_is_closed_on_every_path(db_path, tmp_path, monkeypatch):
+    """Busy, success and error all close the short-lived connection."""
+    db = MemoryDatabase(db_path)
+    _grow_wal(db)
+    reader = sqlite3.connect(str(db_path))  # before the patch: a plain connection
+    reader.execute("BEGIN")
+    reader.execute("SELECT COUNT(*) FROM filler").fetchone()
+    opened = _record_connections(monkeypatch)
+
+    try:
+        busy = db.checkpoint_truncate(timeout=0.1, min_wal_bytes=0)
+    finally:
+        reader.rollback()
+        reader.close()
+    assert busy is not None and busy[0] == 1
+
+    done = db.checkpoint_truncate(timeout=0.1, min_wal_bytes=0)
+    assert done is not None and done[0] == 0
+
+    bogus = tmp_path / "not-a-db.db"
+    bogus.write_bytes(b"this is not an sqlite file, just bytes " * 64)
+    db.db_path = bogus
+    assert db.checkpoint_truncate(timeout=0.1) is None
+    db.db_path = db_path
+
+    assert [o["closed"] for o in opened] == [1, 1, 1]
     db.close()
 
 

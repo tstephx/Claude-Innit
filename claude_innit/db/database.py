@@ -779,32 +779,46 @@ class MemoryDatabase:
             return 0
 
     def checkpoint_truncate(
-        self, timeout: float = CHECKPOINT_BUSY_TIMEOUT_SECONDS
+        self,
+        timeout: float = CHECKPOINT_BUSY_TIMEOUT_SECONDS,
+        min_wal_bytes: Optional[int] = None,
     ) -> Optional[tuple[int, int, int]]:
-        """Checkpoint the WAL and truncate the -wal file to zero bytes.
+        """Checkpoint the WAL, and truncate the -wal file if it is large.
 
-        Two steps, on a short-lived connection of its own (so the short busy
-        timeout never applies to statements on the main connection):
+        Up to two steps, on a short-lived connection of its own (so the short
+        busy timeout never applies to statements on the main connection):
 
         1. ``wal_checkpoint(PASSIVE)`` copies the log back into the database
            without taking the write lock, so other writers keep working however
            large the log is.
-        2. Only if that copied every frame, ``wal_checkpoint(TRUNCATE)`` resets
-           the file. It does hold the write lock, but only has to copy what was
-           committed since step 1 started. If step 1 was held back (a reader
-           pins an older snapshot, or another checkpoint is running), step 2 is
-           skipped: it could not reset the log anyway and would only block
-           writers while it waited.
+        2. ``wal_checkpoint(TRUNCATE)`` resets the file to zero bytes. It runs
+           only if step 1 copied every frame AND the -wal file is larger than
+           ``min_wal_bytes`` (default: ``JOURNAL_SIZE_LIMIT_BYTES``). It holds
+           the write lock, but only has to copy what was committed since step 1
+           started.
+
+        Why step 2 is conditional. If step 1 was held back, TRUNCATE is no use:
+        with a reader pinning an older snapshot it could not reset the log and
+        would only block writers while it waited, and with another checkpoint
+        running it would fail at once. And below the size limit there is
+        nothing worth truncating: ``journal_size_limit`` already cuts the file
+        back on the first commit after a reset. This call runs at every session
+        start and exit, so skipping step 2 there keeps the write lock out of
+        the common case.
 
         Limits: ``timeout`` bounds lock waits only. Step 1 has no time bound
-        (its first run on a very large log is I/O-bound), and a reader on the
-        newest snapshot lets step 1 finish, so step 2 can still hold the write
-        lock for up to ``timeout`` before it reports busy.
+        (its first run on a very large log is I/O-bound). When step 2 does run,
+        a reader on the newest snapshot makes it hold the write lock for up to
+        ``timeout`` before it reports busy; every writer in every process waits
+        that long (measured on a test database, SQLite 3.54).
 
         Returns ``(busy, wal_frames, checkpointed_frames)``. ``busy == 1`` means
-        the log was not reset; that is logged as a warning. Never raises: an
-        SQLite or path error is logged and ``None`` is returned.
+        the log could not be fully copied back or reset; that is logged as a
+        warning. ``busy == 0`` with a file left under the limit is the normal
+        result. Never raises: an SQLite or path error is logged and ``None`` is
+        returned.
         """
+        threshold = JOURNAL_SIZE_LIMIT_BYTES if min_wal_bytes is None else min_wal_bytes
         conn = None
         step = "PASSIVE"
         try:
@@ -818,7 +832,7 @@ class MemoryDatabase:
             busy, wal_frames, checkpointed = int(row[0]), int(row[1]), int(row[2])
             if busy or checkpointed < wal_frames:
                 busy = 1
-            else:
+            elif self.wal_size_bytes() > threshold:
                 step = "TRUNCATE"
                 row = conn.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
                 busy, wal_frames, checkpointed = int(row[0]), int(row[1]), int(row[2])

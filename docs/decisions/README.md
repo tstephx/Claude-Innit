@@ -45,7 +45,7 @@ Permanent decision log for Claude-Innit. Each ADR captures a single architectura
 
 **ADR-007: vault_tag as an MCP Tool** — Frontmatter tagging is a callable MCP tool with a two-phase preview/apply flow and folder + file-level override granularity, not a one-off backfill script — so Claude can tag new files mid-session, not just historical ones.
 
-**ADR-008: WAL Size Control** — Every connection sets `journal_size_limit` (64 MiB) and the server runs a PASSIVE-then-TRUNCATE checkpoint after maintenance tools, after startup sync and at shutdown, so the `-wal` file no longer stays at its high-water mark. Extends ADR-002.
+**ADR-008: WAL Size Control** — Every connection sets `journal_size_limit` (64 MiB) and the server runs a PASSIVE-then-TRUNCATE checkpoint after maintenance tools, after startup sync and at shutdown, so the `-wal` file no longer stays at its high-water mark once nothing pins the log. TRUNCATE runs only when the file is over the limit, and never inside a tool call. Extends ADR-002.
 
 ---
 
