@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-Materialize innit personal and project memories into the Obsidian vault's Claude-Memory/.
+Materialize innit personal and project memories into the Obsidian vault's 6_System/Claude-Memory/.
 
-- personal/* → Claude-Memory/personal-innit.md
-- project/*  → Claude-Memory/{project-slug}-innit.md (create or update if stale)
+- personal/* → 6_System/Claude-Memory/personal-innit.md
+- project/*  → 6_System/Claude-Memory/{project-slug}-innit.md (create or update if stale)
 
 Usage:
     python scripts/materialize_memories.py [--dry-run] [--verbose]

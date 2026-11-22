@@ -536,11 +536,11 @@ def vault_stats(
     by_module = db.vault_files_by_module()
     by_status = db.vault_files_by_status()
 
-    # Inbox count: files in Inbox/ directory
+    # Inbox count: files in the vault's 0_Inbox/ directory
     inbox_count = 0
     try:
         inbox_rows = db.execute(
-            "SELECT COUNT(*) FROM vault_files WHERE file_path LIKE '%/Inbox/%'"
+            "SELECT COUNT(*) FROM vault_files WHERE file_path LIKE '%/0_Inbox/%'"
         ).fetchone()
         inbox_count = inbox_rows[0] if inbox_rows else 0
     except Exception:
