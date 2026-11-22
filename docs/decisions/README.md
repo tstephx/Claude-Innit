@@ -25,6 +25,7 @@ Permanent decision log for Claude-Innit. Each ADR captures a single architectura
 | [ADR-005](ADR-005-hybrid-rrf-vault-federated-search.md) | Two-Level RRF Fusion for Vault and Federated Search | 2026-03-09 | Implemented | — |
 | [ADR-006](ADR-006-path-prefixed-module-detection.md) | Path-Prefixed Module Detection for Extra-Path Files | 2026-03-16 | Implemented | — |
 | [ADR-007](ADR-007-vault-tag-two-phase-mcp-tool.md) | vault_tag as an MCP Tool with Two-Phase Preview/Apply | 2026-03-16 | Implemented | — |
+| [ADR-008](ADR-008-wal-size-control.md) | WAL Size Control (journal_size_limit + Explicit Checkpoints) | 2026-11-22 | Implemented | — |
 
 ---
 
@@ -43,6 +44,8 @@ Permanent decision log for Claude-Innit. Each ADR captures a single architectura
 **ADR-006: Path-Prefixed Module Detection** — Extra-index-path files (`_Lab`, `_Projects`) get path-prefixed module names (`lab/project-name`) instead of bare folder names, fixing 8,128 files that showed as "unassigned" and avoiding folder-name collisions across roots.
 
 **ADR-007: vault_tag as an MCP Tool** — Frontmatter tagging is a callable MCP tool with a two-phase preview/apply flow and folder + file-level override granularity, not a one-off backfill script — so Claude can tag new files mid-session, not just historical ones.
+
+**ADR-008: WAL Size Control** — Every connection sets `journal_size_limit` (64 MiB) and the server runs a PASSIVE-then-TRUNCATE checkpoint after maintenance tools, after startup sync and at shutdown, so the `-wal` file no longer stays at its high-water mark. Extends ADR-002.
 
 ---
 

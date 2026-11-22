@@ -735,8 +735,9 @@ class MemoryDatabase:
         wal_bytes = self.wal_size_bytes()
         if wal_bytes > WAL_SIZE_WARN_BYTES:
             warnings.append(
-                f"WAL file is {wal_bytes} bytes (over {WAL_SIZE_WARN_BYTES}): "
-                "checkpoints are not resetting the log, likely a long-lived reader"
+                f"WAL file is {wal_bytes} bytes (over {WAL_SIZE_WARN_BYTES}). "
+                "It shrinks at the next checkpoint that can reset the log; if it "
+                "stays this large, some connection is holding the log open"
             )
 
         return {
@@ -766,11 +767,15 @@ class MemoryDatabase:
         self._conn.commit()
 
     def wal_size_bytes(self) -> int:
-        """Size of the -wal file on disk, 0 if there is none."""
-        wal_path = self.db_path.with_name(self.db_path.name + "-wal")
+        """Size of the -wal file on disk, 0 if there is none.
+
+        Resolved first: SQLite keeps the -wal beside the real file, not beside
+        a symlink to it.
+        """
         try:
-            return wal_path.stat().st_size
-        except OSError:
+            real = self.db_path.resolve()
+            return real.with_name(real.name + "-wal").stat().st_size
+        except (OSError, RuntimeError):
             return 0
 
     def checkpoint_truncate(
@@ -778,16 +783,30 @@ class MemoryDatabase:
     ) -> Optional[tuple[int, int, int]]:
         """Checkpoint the WAL and truncate the -wal file to zero bytes.
 
-        Runs ``PRAGMA wal_checkpoint(TRUNCATE)`` on a short-lived connection of
-        its own, so the short busy timeout never applies to statements running
-        on the main connection from another thread.
+        Two steps, on a short-lived connection of its own (so the short busy
+        timeout never applies to statements on the main connection):
+
+        1. ``wal_checkpoint(PASSIVE)`` copies the log back into the database
+           without taking the write lock, so other writers keep working however
+           large the log is.
+        2. Only if that copied every frame, ``wal_checkpoint(TRUNCATE)`` resets
+           the file. It does hold the write lock, but only has to copy what was
+           committed since step 1 started. If step 1 was held back (a reader
+           pins an older snapshot, or another checkpoint is running), step 2 is
+           skipped: it could not reset the log anyway and would only block
+           writers while it waited.
+
+        Limits: ``timeout`` bounds lock waits only. Step 1 has no time bound
+        (its first run on a very large log is I/O-bound), and a reader on the
+        newest snapshot lets step 1 finish, so step 2 can still hold the write
+        lock for up to ``timeout`` before it reports busy.
 
         Returns ``(busy, wal_frames, checkpointed_frames)``. ``busy == 1`` means
-        another connection was still reading or writing and the log was not
-        reset; that is logged as a warning. Never raises: an SQLite error is
-        logged and ``None`` is returned.
+        the log was not reset; that is logged as a warning. Never raises: an
+        SQLite or path error is logged and ``None`` is returned.
         """
         conn = None
+        step = "PASSIVE"
         try:
             # mode=rw: fail (and log) if the file is gone, never create one.
             conn = sqlite3.connect(
@@ -795,23 +814,28 @@ class MemoryDatabase:
                 uri=True,
                 timeout=timeout,
             )
-            row = conn.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
-        except sqlite3.Error as exc:
+            row = conn.execute("PRAGMA wal_checkpoint(PASSIVE)").fetchone()
+            busy, wal_frames, checkpointed = int(row[0]), int(row[1]), int(row[2])
+            if busy or checkpointed < wal_frames:
+                busy = 1
+            else:
+                step = "TRUNCATE"
+                row = conn.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
+                busy, wal_frames, checkpointed = int(row[0]), int(row[1]), int(row[2])
+        except (sqlite3.Error, OSError, RuntimeError, ValueError, TypeError) as exc:
             logger.warning(
-                "WAL checkpoint(TRUNCATE) failed on %s: %s", self.db_path, exc
+                "WAL checkpoint(%s) failed on %s: %s", step, self.db_path, exc
             )
             return None
         finally:
             if conn is not None:
                 conn.close()
-        if row is None:
-            return None
-        busy, wal_frames, checkpointed = int(row[0]), int(row[1]), int(row[2])
         if busy:
             logger.warning(
-                "WAL checkpoint(TRUNCATE) busy on %s: another connection is still "
-                "reading or writing, log not reset (wal_frames=%d, checkpointed=%d, "
-                "wal_bytes=%d)",
+                "WAL checkpoint(%s) busy on %s: held back by another connection "
+                "(a reader, a writer or another checkpoint), log not reset "
+                "(wal_frames=%d, checkpointed=%d, wal_bytes=%d)",
+                step,
                 self.db_path,
                 wal_frames,
                 checkpointed,
@@ -820,17 +844,5 @@ class MemoryDatabase:
         return busy, wal_frames, checkpointed
 
     def close(self):
-        """Close database connection, resetting the WAL first when possible.
-
-        SQLite only cleans the WAL up by itself when the *last* connection
-        closes; with several server processes open that never happens, so each
-        close attempts a TRUNCATE checkpoint. Skipped when this connection has
-        uncommitted work (the checkpoint would only wait for our own lock).
-        """
-        try:
-            in_transaction = self._conn.in_transaction
-        except sqlite3.ProgrammingError:
-            return  # already closed: a second close() stays a no-op
-        if not in_transaction:
-            self.checkpoint_truncate()
+        """Close database connection."""
         self._conn.close()

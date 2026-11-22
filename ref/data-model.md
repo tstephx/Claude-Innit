@@ -227,6 +227,7 @@ Enabled on every connection open:
 ```python
 sqlite3.connect(db_path, timeout=30, check_same_thread=False)
 PRAGMA journal_mode=WAL      # concurrent readers + single writer
+PRAGMA journal_size_limit=67108864  # 64 MiB: -wal file is cut back after a log reset (ADR-008)
 PRAGMA synchronous=NORMAL    # safe with WAL, avoids fsync on every commit
 PRAGMA foreign_keys=ON       # enforce FK constraints
 ```
