@@ -283,4 +283,6 @@ Checks:
 2. FTS index sync for memories and vault (count comparison, rebuilds if off)
 3. Orphaned embeddings (memory embeddings, vault embeddings, chunk embeddings)
 
-Returns: `{ "status": "healthy|repaired|unhealthy", "memories": N, "issues": [...], "repairs": [...] }`
+Returns: `{ "status": "healthy|repaired|unhealthy", "memories": N, "wal_bytes": N, "warnings": [...], "issues": [...], "repairs": [...] }`
+
+`wal_bytes` is the size of the `-wal` file on disk. `warnings` holds one entry when it is over 1 GiB; a warning does not change `status`.

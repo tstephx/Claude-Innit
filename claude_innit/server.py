@@ -65,6 +65,8 @@ class InnitServer:
         # mode; in HTTP mode it stops two sessions from re-indexing the vault
         # at the same time against the one shared server.
         self._maintenance_lock = asyncio.Lock()
+        # Background WAL checkpoints started after maintenance tools (issue #6).
+        self._checkpoint_tasks: set[asyncio.Task] = set()
         # Pre-load embedding model and matrix to avoid an MCP timeout on the
         # first semantic query (commit 2ef3a7f). HTTP mode passes
         # warm_embeddings=False and warms in the background after binding
@@ -414,8 +416,36 @@ class InnitServer:
         """Handle tool calls with error boundary — never drops the MCP connection."""
         if name in _MAINTENANCE_TOOLS:
             async with self._maintenance_lock:
-                return await self._call_tool(name, arguments)
+                try:
+                    return await self._call_tool(name, arguments)
+                finally:
+                    # These are the large write batches: reset the WAL once
+                    # the batch is done (issue #6). As a background task, so
+                    # neither the tool's result nor the maintenance lock waits
+                    # for a checkpoint that has no time bound.
+                    self._schedule_checkpoint()
         return await self._call_tool(name, arguments)
+
+    def _schedule_checkpoint(self) -> None:
+        """Start a WAL checkpoint in a worker thread and return at once."""
+        task = asyncio.create_task(asyncio.to_thread(self.db.checkpoint_truncate))
+        self._checkpoint_tasks.add(task)  # keep a reference until it is done
+        task.add_done_callback(self._checkpoint_done)
+
+    def _checkpoint_done(self, task: "asyncio.Task") -> None:
+        self._checkpoint_tasks.discard(task)
+        if not task.cancelled() and task.exception() is not None:
+            logger.warning("WAL checkpoint task failed: %s", task.exception())
+
+    async def drain_checkpoints(self) -> None:
+        """Wait for the background checkpoints started so far.
+
+        Shutdown calls this before its own checkpoint, so the two do not
+        overlap (the second would only report busy). Never raises.
+        """
+        tasks = list(self._checkpoint_tasks)
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
 
     async def _call_tool(self, name: str, arguments: dict) -> list[TextContent]:
         try:
@@ -648,6 +678,9 @@ async def _background_sync(sync: MarkdownSync) -> None:
         await asyncio.to_thread(sync.sync_all)
     except Exception:
         logger.debug("Background sync failed", exc_info=True)
+    finally:
+        # Startup sync is a write batch too: reset the WAL afterwards (issue #6).
+        await asyncio.to_thread(sync.db.checkpoint_truncate)
 
 
 def _server_config_from_env() -> dict:
@@ -692,11 +725,17 @@ async def main():
         if memories_dir.exists():
             asyncio.create_task(_background_sync(innit_server.sync))
 
-        await innit_server.server.run(
-            read_stream,
-            write_stream,
-            innit_server.server.create_initialization_options(),
-        )
+        try:
+            await innit_server.server.run(
+                read_stream,
+                write_stream,
+                innit_server.server.create_initialization_options(),
+            )
+        finally:
+            await innit_server.drain_checkpoints()
+            # Shutdown: reset the WAL (issue #6). Only reached on a clean exit
+            # (stdin closed); a killed process skips it.
+            await asyncio.to_thread(innit_server.db.checkpoint_truncate)
 
 
 # --- Shared HTTP mode -------------------------------------------------------
@@ -751,6 +790,9 @@ def build_http_app(
             finally:
                 for task in background:
                     task.cancel()
+                await innit_server.drain_checkpoints()
+                # Shutdown: reset the WAL (issue #6).
+                await asyncio.to_thread(innit_server.db.checkpoint_truncate)
 
     app.router.lifespan_context = lifespan
     app.state.background_tasks = background

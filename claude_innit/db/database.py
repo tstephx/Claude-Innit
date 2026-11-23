@@ -9,6 +9,20 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
+# WAL size control (issue #6). SQLite's automatic checkpoint copies pages back
+# into the database but never shrinks the -wal file, so without a limit the file
+# stays at its high-water mark. With journal_size_limit set, SQLite truncates the
+# file to this size on the first commit after the log has been reset.
+JOURNAL_SIZE_LIMIT_BYTES = 64 * 1024 * 1024
+
+# How long a TRUNCATE checkpoint waits for readers and writers before it gives
+# up and reports busy. Deliberately far below the 30 s statement timeout: a
+# checkpoint is housekeeping and must not stall shutdown or a tool call.
+CHECKPOINT_BUSY_TIMEOUT_SECONDS = 2.0
+
+# integrity_check() warns when the -wal file is larger than this.
+WAL_SIZE_WARN_BYTES = 1024 * 1024 * 1024
+
 
 class MemoryDatabase:
     """SQLite database for storing and searching memories."""
@@ -22,6 +36,7 @@ class MemoryDatabase:
         )
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA journal_mode=WAL")
+        self._conn.execute(f"PRAGMA journal_size_limit={int(JOURNAL_SIZE_LIMIT_BYTES)}")
         self._conn.execute("PRAGMA synchronous=NORMAL")
         self._conn.execute("PRAGMA foreign_keys = ON")
         self._create_tables()
@@ -714,6 +729,17 @@ class MemoryDatabase:
         except Exception:
             pass  # Tables may not exist yet
 
+        # WAL size: reported, and a warning (not an issue: nothing is corrupt and
+        # there is nothing to auto-repair) above WAL_SIZE_WARN_BYTES.
+        warnings = []
+        wal_bytes = self.wal_size_bytes()
+        if wal_bytes > WAL_SIZE_WARN_BYTES:
+            warnings.append(
+                f"WAL file is {wal_bytes} bytes (over {WAL_SIZE_WARN_BYTES}). "
+                "It shrinks at the next checkpoint that can reset the log; if it "
+                "stays this large, some connection is holding the log open"
+            )
+
         return {
             "status": "healthy"
             if not issues
@@ -730,6 +756,8 @@ class MemoryDatabase:
             "vault_embeddings": vault_emb_count,
             "vault_chunks": chunk_count,
             "vault_chunk_embeddings": chunk_emb_count,
+            "wal_bytes": wal_bytes,
+            "warnings": warnings,
             "issues": issues,
             "repairs": repairs,
         }
@@ -737,6 +765,97 @@ class MemoryDatabase:
     def commit(self):
         """Commit the current transaction."""
         self._conn.commit()
+
+    def wal_size_bytes(self) -> int:
+        """Size of the -wal file on disk, 0 if there is none.
+
+        Resolved first: SQLite keeps the -wal beside the real file, not beside
+        a symlink to it.
+        """
+        try:
+            real = self.db_path.resolve()
+            return real.with_name(real.name + "-wal").stat().st_size
+        except (OSError, RuntimeError):
+            return 0
+
+    def checkpoint_truncate(
+        self,
+        timeout: float = CHECKPOINT_BUSY_TIMEOUT_SECONDS,
+        min_wal_bytes: Optional[int] = None,
+    ) -> Optional[tuple[int, int, int]]:
+        """Checkpoint the WAL, and truncate the -wal file if it is large.
+
+        Up to two steps, on a short-lived connection of its own (so the short
+        busy timeout never applies to statements on the main connection):
+
+        1. ``wal_checkpoint(PASSIVE)`` copies the log back into the database
+           without taking the write lock, so other writers keep working however
+           large the log is.
+        2. ``wal_checkpoint(TRUNCATE)`` resets the file to zero bytes. It runs
+           only if step 1 copied every frame AND the -wal file is larger than
+           ``min_wal_bytes`` (default: ``JOURNAL_SIZE_LIMIT_BYTES``). It holds
+           the write lock, but only has to copy what was committed since step 1
+           started.
+
+        Why step 2 is conditional. If step 1 was held back, TRUNCATE is no use:
+        with a reader pinning an older snapshot it could not reset the log and
+        would only block writers while it waited, and with another checkpoint
+        running it would fail at once. And below the size limit there is
+        nothing worth truncating: ``journal_size_limit`` already cuts the file
+        back on the first commit after a reset. This call runs at every session
+        start and exit, so skipping step 2 there keeps the write lock out of
+        the common case.
+
+        Limits: ``timeout`` bounds lock waits only. Step 1 has no time bound
+        (its first run on a very large log is I/O-bound). When step 2 does run,
+        a reader on the newest snapshot makes it hold the write lock for up to
+        ``timeout`` before it reports busy; every writer in every process waits
+        that long (measured on a test database, SQLite 3.54).
+
+        Returns ``(busy, wal_frames, checkpointed_frames)``. ``busy == 1`` means
+        the log could not be fully copied back or reset; that is logged as a
+        warning. ``busy == 0`` with a file left under the limit is the normal
+        result. Never raises: an SQLite or path error is logged and ``None`` is
+        returned.
+        """
+        threshold = JOURNAL_SIZE_LIMIT_BYTES if min_wal_bytes is None else min_wal_bytes
+        conn = None
+        step = "PASSIVE"
+        try:
+            # mode=rw: fail (and log) if the file is gone, never create one.
+            conn = sqlite3.connect(
+                self.db_path.resolve().as_uri() + "?mode=rw",
+                uri=True,
+                timeout=timeout,
+            )
+            row = conn.execute("PRAGMA wal_checkpoint(PASSIVE)").fetchone()
+            busy, wal_frames, checkpointed = int(row[0]), int(row[1]), int(row[2])
+            if busy or checkpointed < wal_frames:
+                busy = 1
+            elif self.wal_size_bytes() > threshold:
+                step = "TRUNCATE"
+                row = conn.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
+                busy, wal_frames, checkpointed = int(row[0]), int(row[1]), int(row[2])
+        except (sqlite3.Error, OSError, RuntimeError, ValueError, TypeError) as exc:
+            logger.warning(
+                "WAL checkpoint(%s) failed on %s: %s", step, self.db_path, exc
+            )
+            return None
+        finally:
+            if conn is not None:
+                conn.close()
+        if busy:
+            logger.warning(
+                "WAL checkpoint(%s) busy on %s: held back by another connection "
+                "(a reader, a writer or another checkpoint), log not reset "
+                "(wal_frames=%d, checkpointed=%d, wal_bytes=%d)",
+                step,
+                self.db_path,
+                wal_frames,
+                checkpointed,
+                self.wal_size_bytes(),
+            )
+        return busy, wal_frames, checkpointed
 
     def close(self):
         """Close database connection."""
