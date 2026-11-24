@@ -361,12 +361,12 @@ class InnitServer:
                         },
                         "folder_defaults": {
                             "type": "object",
-                            "description": 'Per-folder default overrides, e.g. {"Projects": {"status": "archived"}}',
+                            "description": 'Per-folder default overrides, e.g. {"1_Projects": {"status": "archived"}}',
                             "additionalProperties": {"type": "object"},
                         },
                         "file_overrides": {
                             "type": "object",
-                            "description": 'Per-file overrides (relative path), e.g. {"Projects/old.md": {"status": "archived"}}',
+                            "description": 'Per-file overrides (relative path), e.g. {"1_Projects/old.md": {"status": "archived"}}',
                             "additionalProperties": {"type": "object"},
                         },
                     },

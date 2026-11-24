@@ -21,33 +21,34 @@ VAULT_MEMORY = VAULT_ROOT / "6_System" / "Claude-Memory"
 # Used to generate [[wikilinks]] in the related: field.
 
 PROJECT_CARD_MAP = {
-    "book-ingestion": "Projects/mcp (category)/mcp-books (category)/book-ingestion-python/_PROJECT_CARD",
-    "book-ingestion-python": "Projects/mcp (category)/mcp-books (category)/book-ingestion-python/_PROJECT_CARD",
-    "book-mcp-server": "Projects/mcp (category)/mcp-books (category)/book-mcp-server/_PROJECT_CARD",
-    "briefcase": "Projects/mcp (category)/briefcase/_PROJECT_CARD",
-    "career-coach-mcp": "Projects/mcp (category)/career-coach-mcp/_PROJECT_CARD",
-    "claude-cheatsheet": "Projects/claude-cheatsheet/_PROJECT_CARD",
-    "claude-innit": "Projects/mcp (category)/Claude-Innit/_PROJECT_CARD",
-    "claude-workspace": "Projects/claude-workspace/_PROJECT_CARD",
-    "dev-scripts": "Projects/claude-projects/dev-scripts/_PROJECT_CARD",
-    "document-intelligence": "Projects/taylor-work (category)/document-intelligence/_PROJECT_CARD",
-    "fast-mail": "Projects/mcp (category)/fast-mail/_PROJECT_CARD",
-    "my-mcp-portfolio": "Projects/mcp (category)/my-mcp-portfolio/_PROJECT_CARD",
-    "obsidian-brain-framework": "Projects/obsidian-brain-framework/_PROJECT_CARD",
-    "periodical-parser": "Projects/whatbox-server/periodical-parser/_PROJECT_CARD",
-    "virtual-career-coach": "Projects/mcp (category)/career-coach-mcp/_PROJECT_CARD",
-    "website-portfolio": "Projects/whatbox-server/website-portfolio/_PROJECT_CARD",
-    "whatbox": "Projects/whatbox-server/whatbox/_PROJECT_CARD",
-    "whatbox-portfolio-mcp": "Projects/mcp (category)/whatbox-portfolio-mcp/_PROJECT_CARD",
-    "write-pipeline": "Projects/write-pipeline/_PROJECT_CARD",
+    "book-ingestion": "1_Projects/book-ingestion-python/_PROJECT_CARD",
+    "book-ingestion-python": "1_Projects/book-ingestion-python/_PROJECT_CARD",
+    "book-mcp-server": "1_Projects/book-mcp-server/_PROJECT_CARD",
+    "briefcase": "1_Projects/briefcase/_PROJECT_CARD",
+    "career-coach-mcp": "1_Projects/career-coach-mcp/_PROJECT_CARD",
+    "claude-cheatsheet": "1_Projects/claude-cheatsheet/_PROJECT_CARD",
+    "claude-innit": "1_Projects/Claude-Innit/_PROJECT_CARD",
+    "dev-scripts": "1_Projects/dev-scripts/_PROJECT_CARD",
+    "document-intelligence": "1_Projects/document-intelligence/_PROJECT_CARD",
+    "fast-mail": "1_Projects/fast-mail/_PROJECT_CARD",
+    "my-mcp-portfolio": "1_Projects/my-mcp-portfolio/_PROJECT_CARD",
+    "obsidian-brain-framework": "1_Projects/obsidian-brain-framework/_PROJECT_CARD",
+    "periodical-parser": "1_Projects/periodical-parser/_PROJECT_CARD",
+    "virtual-career-coach": "1_Projects/career-coach-mcp/_PROJECT_CARD",
+    "website-portfolio": "1_Projects/website-portfolio/_PROJECT_CARD",
+    "whatbox": "1_Projects/whatbox/_PROJECT_CARD",
+    "write-pipeline": "1_Projects/write-pipeline/_PROJECT_CARD",
+    # Repository copies with no repository left: their folders sit in the archive.
+    "claude-workspace": "4_Archive/Repo-Copies/claude-workspace/_PROJECT_CARD",
+    "whatbox-portfolio-mcp": "4_Archive/Repo-Copies/whatbox-portfolio-mcp/_PROJECT_CARD",
+    "dotfiles": "4_Archive/Repo-Copies/claude-projects/dotfiles/_PROJECT_CARD",
+    "claude-projects": "4_Archive/Repo-Copies/claude-projects/_PROJECT_CARD",
     # Aliases
-    "obsidian-brain": "Projects/obsidian-brain-framework/_PROJECT_CARD",
-    "obsidian-second-brain": "Projects/obsidian-brain-framework/_PROJECT_CARD",
-    "dotfiles": "Projects/claude-projects/dotfiles/_PROJECT_CARD",
-    "action-tracker": "Projects/action-tracker/_PROJECT_CARD",
-    "claude-projects": "Projects/claude-projects/_PROJECT_CARD",
-    "rss-news-server": "Projects/whatbox-server/whatbox/rss-news-server/_PROJECT_CARD",
-    "morning-reader": "Projects/whatbox-server/whatbox/morning-reader/_PROJECT_CARD",
+    "obsidian-brain": "1_Projects/obsidian-brain-framework/_PROJECT_CARD",
+    "obsidian-second-brain": "1_Projects/obsidian-brain-framework/_PROJECT_CARD",
+    "action-tracker": "1_Projects/action-tracker/_PROJECT_CARD",
+    "rss-news-server": "1_Projects/whatbox/rss-news-server/_PROJECT_CARD",
+    "morning-reader": "1_Projects/whatbox/morning-reader/_PROJECT_CARD",
 }
 
 
@@ -139,7 +140,7 @@ def _existing_card(vault_root: Path, rel: str) -> str | None:
 def resolve_card_path(project: str, vault_root: Path | None = None) -> str | None:
     """Vault-relative _PROJECT_CARD path (no .md) for a project slug, or None.
 
-    Uses PROJECT_CARD_MAP, falling back to Projects/<slug>/_PROJECT_CARD. Returns a
+    Uses PROJECT_CARD_MAP, falling back to 1_Projects/<slug>/_PROJECT_CARD. Returns a
     path only when that card exists under the vault, so callers never emit a dead
     `related:` link (mirrors sync_vault `_card_related`, #159/#176).
     """
@@ -147,6 +148,6 @@ def resolve_card_path(project: str, vault_root: Path | None = None) -> str | Non
         return None
     root = vault_root if vault_root is not None else VAULT_ROOT
     rel = PROJECT_CARD_MAP.get(project) or PROJECT_CARD_MAP.get(
-        project.lower(), f"Projects/{project}/_PROJECT_CARD"
+        project.lower(), f"1_Projects/{project}/_PROJECT_CARD"
     )
     return _existing_card(root, rel)

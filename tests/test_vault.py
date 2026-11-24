@@ -147,10 +147,10 @@ class TestParsingHelpers:
             _detect_module(str(vault / "Portfolio" / "doc.md"), str(vault))
             == "portfolio"
         )
-        # Content folders like Projects/, Books/ are detected as modules (lowercase)
+        # Content folders like 1_Projects/, Books/ are detected as modules (lowercase; the module is the first folder, so 1_projects)
         assert (
-            _detect_module(str(vault / "Projects" / "readme.md"), str(vault))
-            == "projects"
+            _detect_module(str(vault / "1_Projects" / "readme.md"), str(vault))
+            == "1_projects"
         )
         assert (
             _detect_module(str(vault / "Books" / "summary.md"), str(vault)) == "books"
@@ -259,11 +259,11 @@ class TestParsingHelpers:
         vault = tmp_path / "vault"
         vault.mkdir()
         result = _detect_module(
-            str(vault / "Projects" / "readme.md"),
+            str(vault / "1_Projects" / "readme.md"),
             str(vault),
             extra_paths=[str(tmp_path / "lab")],
         )
-        assert result == "projects"  # no prefix for vault files
+        assert result == "1_projects"  # no prefix for vault files
 
 
 class TestVaultIndexer:
