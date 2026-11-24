@@ -525,9 +525,17 @@ class TestVaultStats:
         assert stats["by_module"]["behavioral-studio"] == 2  # 2 stories
 
     def test_stats_inbox_count(self, db, vault_dir):
+        (vault_dir / "Inbox").rename(vault_dir / "0_Inbox")
         vault_index(db, vault_root=str(vault_dir))
         stats = vault_stats(db)
-        assert stats["inbox_count"] == 1  # 1 capture in Inbox/
+        assert stats["inbox_count"] == 1  # 1 capture in 0_Inbox/
+
+    def test_stats_inbox_count_ignores_other_inbox_folders(self, db, vault_dir):
+        # Only the vault's numbered inbox counts; a folder merely named Inbox
+        # (here the fixture's top-level one) does not.
+        vault_index(db, vault_root=str(vault_dir))
+        stats = vault_stats(db)
+        assert stats["inbox_count"] == 0
 
     def test_stats_empty_db(self, db):
         stats = vault_stats(db)

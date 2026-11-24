@@ -13,8 +13,8 @@ INNIT_BASE = Path.home() / "Dev/_Projects/Claude-Innit/data/memories"
 VAULT_ROOT = Path(
     os.environ.get("VAULT_ROOT", str(Path.home() / "Dev/Obsidian-Second-Brain"))
 )
-VAULT_SESSIONS = VAULT_ROOT / "Sessions"
-VAULT_MEMORY = VAULT_ROOT / "Claude-Memory"
+VAULT_SESSIONS = VAULT_ROOT / "6_System" / "Sessions"
+VAULT_MEMORY = VAULT_ROOT / "6_System" / "Claude-Memory"
 
 # ── Project → _PROJECT_CARD path map ──────────────────────────────────────────
 # Maps project slug (from innit metadata) to vault-relative path (no .md extension).
