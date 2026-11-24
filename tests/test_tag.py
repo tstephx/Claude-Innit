@@ -245,3 +245,10 @@ class TestVaultTagApply:
         content = (proj / "setup.md").read_text()
         assert content.startswith("---\n")
         assert "status: active" in content
+
+
+def test_the_numbered_project_folder_is_typed_project():
+    """The vault's project folder is 1_Projects since its stage 3: the module is the
+    lowercased first folder, so the map needs that key or new notes there type as note."""
+    assert FOLDER_TYPE_MAP["1_projects"] == "project"
+    assert FOLDER_TYPE_MAP["projects"] == "project"

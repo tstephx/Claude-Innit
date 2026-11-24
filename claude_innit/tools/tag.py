@@ -10,6 +10,7 @@ import yaml
 
 FOLDER_TYPE_MAP = {
     "projects": "project",
+    "1_projects": "project",
     "guides": "guide",
     "behavioral-studio": "story",
     "portfolio": "portfolio",
