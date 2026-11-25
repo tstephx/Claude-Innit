@@ -30,7 +30,7 @@ def vault_with_cards(tmp_path, monkeypatch):
     import materialize_common
 
     monkeypatch.setattr(materialize_common, "VAULT_ROOT", tmp_path)
-    card = tmp_path / "Projects/mcp (category)/briefcase/_PROJECT_CARD.md"
+    card = tmp_path / "1_Projects/briefcase/_PROJECT_CARD.md"
     card.parent.mkdir(parents=True)
     card.write_text("x")
     return tmp_path
@@ -39,11 +39,11 @@ def vault_with_cards(tmp_path, monkeypatch):
 class TestResolveCardPath:
     """Tests for materialize_common.resolve_card_path."""
 
-    def test_known_project_returns_mapped_path(self):
+    def test_known_project_returns_mapped_path(self, vault_with_cards):
         """A project slug present in PROJECT_CARD_MAP resolves to its mapped path."""
         assert (
             resolve_card_path("briefcase")
-            == "Projects/mcp (category)/briefcase/_PROJECT_CARD"
+            == "1_Projects/briefcase/_PROJECT_CARD"
         )
 
     def test_known_project_link_emitted_only_if_card_exists(self, tmp_path):
@@ -51,71 +51,96 @@ class TestResolveCardPath:
         assert resolve_card_path("briefcase", vault_root=tmp_path) is None
 
     def test_mapped_project_with_existing_card(self, tmp_path):
-        card = tmp_path / "Projects/mcp (category)/briefcase/_PROJECT_CARD.md"
+        card = tmp_path / "1_Projects/briefcase/_PROJECT_CARD.md"
         card.parent.mkdir(parents=True)
         card.write_text("x")
         assert (
             resolve_card_path("briefcase", vault_root=tmp_path)
-            == "Projects/mcp (category)/briefcase/_PROJECT_CARD"
+            == "1_Projects/briefcase/_PROJECT_CARD"
         )
 
     def test_unknown_project_without_card_returns_none(self, tmp_path):
         assert resolve_card_path("some-new-project", vault_root=tmp_path) is None
 
     def test_unknown_project_with_existing_card_falls_back(self, tmp_path):
-        card = tmp_path / "Projects/some-new-project/_PROJECT_CARD.md"
+        card = tmp_path / "1_Projects/some-new-project/_PROJECT_CARD.md"
         card.parent.mkdir(parents=True)
         card.write_text("x")
         assert (
             resolve_card_path("some-new-project", vault_root=tmp_path)
-            == "Projects/some-new-project/_PROJECT_CARD"
+            == "1_Projects/some-new-project/_PROJECT_CARD"
         )
 
     def test_fallback_is_case_insensitive_and_returns_canonical_case(self, tmp_path):
-        card = tmp_path / "Projects/Some-New-Project/_PROJECT_CARD.md"
+        card = tmp_path / "1_Projects/Some-New-Project/_PROJECT_CARD.md"
         card.parent.mkdir(parents=True)
         card.write_text("x")
         assert (
             resolve_card_path("some-new-project", vault_root=tmp_path)
-            == "Projects/Some-New-Project/_PROJECT_CARD"
+            == "1_Projects/Some-New-Project/_PROJECT_CARD"
         )
 
     def test_map_lookup_is_case_insensitive(self, tmp_path):
-        card = tmp_path / "Projects/mcp (category)/briefcase/_PROJECT_CARD.md"
+        card = tmp_path / "1_Projects/briefcase/_PROJECT_CARD.md"
         card.parent.mkdir(parents=True)
         card.write_text("x")
         assert (
             resolve_card_path("Briefcase", vault_root=tmp_path)
-            == "Projects/mcp (category)/briefcase/_PROJECT_CARD"
+            == "1_Projects/briefcase/_PROJECT_CARD"
         )
 
     def test_vault_root_defaults_to_module_vault_root(self, tmp_path, monkeypatch):
         import materialize_common
 
         monkeypatch.setattr(materialize_common, "VAULT_ROOT", tmp_path)
-        card = tmp_path / "Projects/zeta/_PROJECT_CARD.md"
+        card = tmp_path / "1_Projects/zeta/_PROJECT_CARD.md"
         card.parent.mkdir(parents=True)
         card.write_text("x")
-        assert resolve_card_path("zeta") == "Projects/zeta/_PROJECT_CARD"
+        assert resolve_card_path("zeta") == "1_Projects/zeta/_PROJECT_CARD"
 
     def test_empty_project_returns_none(self, tmp_path):
         assert resolve_card_path(None, vault_root=tmp_path) is None
         assert resolve_card_path("", vault_root=tmp_path) is None
+
+    def test_card_links_have_the_flat_stage_3_form(self):
+        """Every mapped card is 1_Projects/<repo>/_PROJECT_CARD or an archived copy's card.
+
+        No category folder, no `Projects/` spelling, no `whatbox-server` parent.
+        """
+        import re
+
+        from materialize_common import PROJECT_CARD_MAP
+
+        flat = re.compile(r"^1_Projects/[^/()]+(/[^/()]+)?/_PROJECT_CARD$")
+        archived = re.compile(r"^4_Archive/Repo-Copies/[^/()]+(/[^/()]+)?/_PROJECT_CARD$")
+        for slug, rel in PROJECT_CARD_MAP.items():
+            assert flat.match(rel) or archived.match(rel), (slug, rel)
+            assert "(category)" not in rel, (slug, rel)
+
+    def test_fallback_path_is_under_1_projects(self, tmp_path):
+        card = tmp_path / "1_Projects/brand-new/_PROJECT_CARD.md"
+        card.parent.mkdir(parents=True)
+        card.write_text("x")
+        assert (
+            resolve_card_path("brand-new", vault_root=tmp_path)
+            == "1_Projects/brand-new/_PROJECT_CARD"
+        )
+        assert not (tmp_path / "Projects").exists()
 
     def test_stale_map_entries_corrected(self):
         from materialize_common import PROJECT_CARD_MAP
 
         assert (
             PROJECT_CARD_MAP["dev-scripts"]
-            == "Projects/claude-projects/dev-scripts/_PROJECT_CARD"
+            == "1_Projects/dev-scripts/_PROJECT_CARD"
         )
         assert (
             PROJECT_CARD_MAP["dotfiles"]
-            == "Projects/claude-projects/dotfiles/_PROJECT_CARD"
+            == "4_Archive/Repo-Copies/claude-projects/dotfiles/_PROJECT_CARD"
         )
         assert (
             PROJECT_CARD_MAP["write-pipeline"]
-            == "Projects/write-pipeline/_PROJECT_CARD"
+            == "1_Projects/write-pipeline/_PROJECT_CARD"
         )
         assert "api-dashboard" not in PROJECT_CARD_MAP
         assert "_lab" not in PROJECT_CARD_MAP
@@ -150,7 +175,7 @@ class TestBuildVaultNote:
             memory_id="test-memory-id",
             body="Some session body text.",
         )
-        assert "[[Projects/mcp (category)/briefcase/_PROJECT_CARD]]" in note
+        assert "[[1_Projects/briefcase/_PROJECT_CARD]]" in note
         assert "memory_id: test-memory-id" in note
 
 
@@ -163,7 +188,7 @@ class TestBuildProjectNote:
             project_slug="briefcase",
             fragments=[("frag1.md", "Some fragment body.")],
         )
-        assert "[[Projects/mcp (category)/briefcase/_PROJECT_CARD]]" in note
+        assert "[[1_Projects/briefcase/_PROJECT_CARD]]" in note
         assert "innit_fragment_count: 1" in note
 
     def test_missing_card_omits_related(self, vault_with_cards):
